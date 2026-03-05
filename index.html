@@ -42,19 +42,32 @@
         // Push local changes to Firebase
         window.firebaseSave = function(localDb) {
             isLocalSave = true; // Prevent echo back to the originating device immediately
+            if (window.setSyncStatus) window.setSyncStatus('saving');
+            
             setDoc(stateDocRef, localDb, { merge: false })
                 .then(() => {
-                    setTimeout(() => { isLocalSave = false; }, 1000); 
+                    setTimeout(() => { 
+                        isLocalSave = false; 
+                        if (window.setSyncStatus) window.setSyncStatus('synced');
+                    }, 1000); 
                 })
-                .catch(e => console.error("Firebase save error:", e));
+                .catch(e => {
+                    console.error("Firebase save error:", e);
+                    if (window.setSyncStatus) window.setSyncStatus('error');
+                });
         };
 
         // First Time Load / Initialize if empty
         getDoc(stateDocRef).then((docSnap) => {
             if (!docSnap.exists() && window.db) {
                 window.firebaseSave(window.db); // Upload initial mock data
+            } else {
+                if (window.setSyncStatus) window.setSyncStatus('synced');
             }
-        }).catch(err => console.error("Firebase init error", err));
+        }).catch(err => {
+            console.error("Firebase init error", err);
+            if (window.setSyncStatus) window.setSyncStatus('error');
+        });
 
         // Listen for Real-time Updates from other devices
         onSnapshot(stateDocRef, (docSnap) => {
@@ -62,10 +75,16 @@
                 const data = docSnap.data();
                 if (data && Object.keys(data).length > 0) {
                     if (window.updateLocalDbFromFirebase) {
+                        if (window.setSyncStatus) window.setSyncStatus('receiving');
                         window.updateLocalDbFromFirebase(data);
+                        setTimeout(() => {
+                            if (window.setSyncStatus) window.setSyncStatus('synced');
+                        }, 800);
                     }
                 }
             }
+        }, (error) => {
+            if (window.setSyncStatus) window.setSyncStatus('error');
         });
     </script>
     <!-- ================= END FIREBASE INTEGRATION ================= -->
@@ -406,7 +425,14 @@
         <div class="main-wrapper">
             <header class="topbar">
                 <h1 id="topbar-title">Executive Dashboard</h1>
-                <div class="user-info">👤 <strong>Admin User</strong> | All Branches</div>
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <!-- Sync Status Badge (Small and Cute) -->
+                    <div id="sync-status" style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.65rem; padding: 0.2rem 0.5rem; border-radius: 999px; background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; transition: all 0.3s ease; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                        <span id="sync-dot" style="width: 6px; height: 6px; background: #10b981; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 2px rgba(16,185,129,0.2); transition: all 0.3s ease;"></span>
+                        <span id="sync-text" style="font-weight: 600;">Connecting...</span>
+                    </div>
+                    <div class="user-info">👤 <strong>Admin User</strong> | All Branches</div>
+                </div>
             </header>
 
             <!-- SINGLE CLEAR MAIN CONTAINER -->
@@ -1080,6 +1106,44 @@
             };
             return map[status] || status;
         }
+
+        // --- Sync Status UI Helper ---
+        window.setSyncStatus = function(status) {
+            const syncEl = document.getElementById('sync-status');
+            const syncDot = document.getElementById('sync-dot');
+            const syncText = document.getElementById('sync-text');
+            if(!syncEl || !syncDot || !syncText) return;
+
+            if(status === 'saving') {
+                syncEl.style.background = '#fef3c7'; 
+                syncEl.style.color = '#92400e'; 
+                syncEl.style.borderColor = '#fde68a'; 
+                syncDot.style.background = '#f59e0b';
+                syncDot.style.boxShadow = '0 0 0 2px rgba(245,158,11,0.2)';
+                syncText.innerText = 'Saving...';
+            } else if(status === 'receiving') {
+                syncEl.style.background = '#e0f2fe'; 
+                syncEl.style.color = '#0369a1'; 
+                syncEl.style.borderColor = '#bae6fd'; 
+                syncDot.style.background = '#0ea5e9';
+                syncDot.style.boxShadow = '0 0 0 2px rgba(14,165,233,0.2)';
+                syncText.innerText = 'Syncing...';
+            } else if(status === 'synced') {
+                syncEl.style.background = '#d1fae5'; 
+                syncEl.style.color = '#065f46'; 
+                syncEl.style.borderColor = '#a7f3d0'; 
+                syncDot.style.background = '#10b981'; 
+                syncDot.style.boxShadow = '0 0 0 2px rgba(16,185,129,0.2)';
+                syncText.innerText = 'Synced';
+            } else if(status === 'error') {
+                syncEl.style.background = '#fee2e2';
+                syncEl.style.color = '#991b1b';
+                syncEl.style.borderColor = '#fecaca';
+                syncDot.style.background = '#ef4444';
+                syncDot.style.boxShadow = '0 0 0 2px rgba(239,68,68,0.2)';
+                syncText.innerText = 'Error';
+            }
+        };
 
         // --- 1. State Management (Master Data + Mock Database) ---
         window.db = {
@@ -2135,7 +2199,6 @@
             
             const dropToggle = document.querySelectorAll('.nav-dropdown-toggle')[1];
             dropToggle.classList.add('open');
-            dropToggle.nextElementSibling.classList.add('open');
             document.querySelectorAll('.sub-nav-btn')[5].classList.add('active'); 
         }
 
@@ -2645,7 +2708,6 @@
             
             const dropToggle = document.querySelectorAll('.nav-dropdown-toggle')[2];
             dropToggle.classList.add('open');
-            dropToggle.nextElementSibling.classList.add('open');
             document.querySelectorAll('.sub-nav-btn')[8].classList.add('active'); 
         }
 
