@@ -1,0 +1,3007 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FG Forecast Management System</title>
+    
+    <!-- เพิ่ม Library สำหรับอ่าน Excel และ PDF -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        if (typeof pdfjsLib !== 'undefined') {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+    </script>
+
+    <!-- ================= FIREBASE INTEGRATION ================= -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+        import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-analytics.js";
+        import { getFirestore, doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyCyLQ4R9qTRto3eD68ZpgWHehSZYW4e3IU",
+            authDomain: "fg-forecast-8c19b.firebaseapp.com",
+            projectId: "fg-forecast-8c19b",
+            storageBucket: "fg-forecast-8c19b.firebasestorage.app",
+            messagingSenderId: "21815943124",
+            appId: "1:21815943124:web:d30e658ce066b8a2ca4041",
+            measurementId: "G-795FHLLWCY"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const analytics = getAnalytics(app);
+        const dbFirestore = getFirestore(app);
+        
+        // Document reference for whole application state
+        const stateDocRef = doc(dbFirestore, 'system_data', 'shared_state');
+        let isLocalSave = false;
+
+        // Push local changes to Firebase
+        window.firebaseSave = function(localDb) {
+            isLocalSave = true; // Prevent echo back to the originating device immediately
+            setDoc(stateDocRef, localDb, { merge: false })
+                .then(() => {
+                    setTimeout(() => { isLocalSave = false; }, 1000); 
+                })
+                .catch(e => console.error("Firebase save error:", e));
+        };
+
+        // First Time Load / Initialize if empty
+        getDoc(stateDocRef).then((docSnap) => {
+            if (!docSnap.exists() && window.db) {
+                window.firebaseSave(window.db); // Upload initial mock data
+            }
+        }).catch(err => console.error("Firebase init error", err));
+
+        // Listen for Real-time Updates from other devices
+        onSnapshot(stateDocRef, (docSnap) => {
+            if (docSnap.exists() && !isLocalSave) {
+                const data = docSnap.data();
+                if (data && Object.keys(data).length > 0) {
+                    if (window.updateLocalDbFromFirebase) {
+                        window.updateLocalDbFromFirebase(data);
+                    }
+                }
+            }
+        });
+    </script>
+    <!-- ================= END FIREBASE INTEGRATION ================= -->
+
+    <style>
+        /* ================= Core CSS ================= */
+        :root {
+            /* Corporate Blue & Slate Theme */
+            --primary: #2563eb; 
+            --primary-hover: #1d4ed8; 
+            --primary-light: #eff6ff;
+            
+            --secondary: #64748b; 
+            --bg-main: #f8fafc; 
+            --bg-sidebar: #0f172a; /* Slate 900 */
+            
+            --text-main: #1e293b; 
+            --text-muted: #94a3b8; 
+            --border-color: #cbd5e1; 
+            
+            --success: #10b981; 
+            --success-bg: #d1fae5;
+            --danger: #ef4444; 
+            --danger-bg: #fee2e2;
+            --warning: #f59e0b; 
+            --warning-bg: #fef3c7;
+            
+            --sidebar-width: 260px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+        body { color: var(--text-main); font-size: 14px; background: var(--bg-main); overflow: hidden; }
+
+        /* ================= App Layout (Desktop Focus) ================= */
+        .app-layout { display: flex; height: 100vh; width: 100vw; }
+        
+        /* Sidebar */
+        .sidebar { width: var(--sidebar-width); background: var(--bg-sidebar); color: white; display: flex; flex-direction: column; flex-shrink: 0; transition: all 0.3s;}
+        .sidebar-brand { padding: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .sidebar-brand h2 { font-size: 1.4rem; color: #fff; margin-bottom: 0.2rem; display: flex; align-items: center; gap: 0.5rem;}
+        .sidebar-brand p { font-size: 0.8rem; color: #94a3b8; }
+        
+        .nav-links { padding: 1rem 0; display: flex; flex-direction: column; gap: 0.25rem; }
+        .nav-btn { width: 100%; background: transparent; border: none; padding: 0.875rem 1.5rem; color: #cbd5e1; font-size: 1rem; font-weight: 500; cursor: pointer; text-align: left; display: flex; align-items: center; gap: 0.75rem; border-left: 4px solid transparent; transition: 0.2s; }
+        .nav-btn:hover { background: rgba(255,255,255,0.05); color: white; }
+        .nav-btn.active { background: rgba(37,99,235,0.15); color: #60a5fa; border-left-color: #3b82f6; }
+        
+        /* Dropdown Sidebar Styles */
+        .nav-dropdown-toggle { justify-content: space-between; }
+        .dropdown-arrow { font-size: 0.7rem; transition: transform 0.3s ease; }
+        .nav-dropdown-toggle.open .dropdown-arrow { transform: rotate(180deg); }
+        .nav-submenu { display: none; flex-direction: column; background: rgba(0,0,0,0.25); border-left: 2px solid #334155; margin-left: 1.5rem; margin-right: 1rem; border-radius: 0 0 6px 6px; }
+        .nav-submenu.open { display: flex; }
+        .sub-nav-btn { padding: 0.75rem 1rem 0.75rem 1.5rem; font-size: 0.9rem; border-left: 2px solid transparent; color: #cbd5e1; }
+        .sub-nav-btn:hover { color: white; }
+        .sub-nav-btn.active { border-left-color: #3b82f6; color: #60a5fa;}
+
+        /* Main Content */
+        .main-wrapper { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+        .topbar { background: white; padding: 1.25rem 2rem; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+        .topbar h1 { font-size: 1.5rem; color: var(--text-main); font-weight: 600; }
+        .user-info { font-size: 0.9rem; color: var(--secondary); background: var(--bg-main); padding: 0.5rem 1rem; border-radius: 999px; border: 1px solid var(--border-color); }
+        
+        .content-area { flex: 1; padding: 2rem; overflow-y: auto; }
+        .page { display: none; animation: fadeIn 0.3s ease-in-out; }
+        .page.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ================= Cards & Forms ================= */
+        .card { background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid var(--border-color); padding: 1.5rem; margin-bottom: 1.5rem; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border-color); }
+        .card-header h2 { font-size: 1.25rem; color: var(--text-main); }
+        .card-header h3 { font-size: 1.1rem; color: var(--text-main); }
+        
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
+        .form-group { display: flex; flex-direction: column; gap: 0.5rem; }
+        .form-group label { font-weight: 600; font-size: 0.875rem; color: var(--text-main); }
+        input, select { padding: 0.6rem 0.75rem; border: 1px solid #94a3b8; border-radius: 6px; font-size: 0.95rem; color: var(--text-main); outline: none; transition: 0.2s; }
+        input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-light); }
+        input:disabled, select:disabled { background-color: #f8fafc; color: var(--text-muted); cursor: not-allowed; border-color: var(--border-color); }
+
+        /* ================= Buttons ================= */
+        .btn { padding: 0.6rem 1.25rem; border: none; border-radius: 6px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: 0.2s; display: inline-flex; align-items: center; gap: 0.5rem; justify-content: center; }
+        .btn-primary { background: var(--primary); color: white; box-shadow: 0 1px 2px rgba(37,99,235,0.3); }
+        .btn-primary:hover { background: var(--primary-hover); transform: translateY(-1px); }
+        .btn-secondary { background: white; color: var(--text-main); border: 1px solid #94a3b8; }
+        .btn-secondary:hover { background: #f1f5f9; }
+        .btn-success { background: var(--success); color: white; box-shadow: 0 1px 2px rgba(16, 185, 129, 0.3); }
+        .btn-success:hover { background: #059669; transform: translateY(-1px); }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-sm { padding: 0.35rem 0.75rem; font-size: 0.85rem; }
+
+        /* ================= Tables ================= */
+        .table-responsive { 
+            overflow-x: auto; 
+            overflow-y: auto; 
+            max-height: 65vh; 
+            border-radius: 8px; 
+            border: 1px solid var(--border-color); 
+            background: white; 
+        }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th, td { padding: 1rem; border-bottom: 1px solid var(--border-color); }
+        
+        .table-responsive table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background-color: #f8fafc;
+            font-weight: 600; 
+            color: var(--text-main); 
+            white-space: nowrap; 
+            font-size: 0.85rem; 
+            text-transform: uppercase; 
+            letter-spacing: 0.05em;
+            box-shadow: inset 0 -2px 0 var(--border-color);
+            border-bottom: none; 
+        }
+        tr:last-child td { border-bottom: none; }
+        tbody tr:hover { background-color: #f1f5f9; }
+        
+        .status-badge { padding: 0.35rem 0.75rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; display: inline-block; text-align: center; }
+        .status-draft { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+        .status-approved { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+        .status-closed { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+        .status-pending { background: #fef3c7; color: #d97706; border: 1px solid #fde68a; }
+
+        /* ================= Business Logic Colors ================= */
+        .row-green td { background-color: rgba(16, 185, 129, 0.05); }
+        .row-red td { background-color: rgba(239, 68, 68, 0.05); }
+        .row-yellow td { background-color: rgba(245, 158, 11, 0.05); }
+
+        .text-green { color: var(--success); font-weight: 600; }
+        .text-red { color: var(--danger); font-weight: 600; }
+        .text-yellow { color: var(--warning); font-weight: 600; }
+
+        /* ================= MATRIX TABLE CSS ================= */
+        .matrix-container { 
+            width: 100%; 
+            max-width: 100%; 
+            overflow: auto; 
+            border: 1px solid var(--border-color); 
+            border-radius: 12px; 
+            background: white; 
+            max-height: 60vh; 
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.02);
+        }
+        .matrix-table { 
+            width: max-content; 
+            border-collapse: separate; 
+            border-spacing: 0; 
+            min-width: 100%; 
+        }
+        .matrix-table th, .matrix-table td { 
+            padding: 0.5rem; 
+            border-bottom: 1px solid var(--border-color); 
+            border-right: 1px solid var(--border-color); 
+            background: white; 
+            vertical-align: middle;
+        }
+        .matrix-table thead th { 
+            background: #f8fafc; 
+            position: sticky; 
+            top: 0; 
+            z-index: 20; 
+            border-bottom: 2px solid #94a3b8; 
+            color: var(--text-main); 
+            font-size: 0.75rem; 
+            text-transform: uppercase; 
+            letter-spacing: 0.05em;
+            white-space: nowrap;
+        }
+        
+        /* Sticky Left 1: SKU */
+        .matrix-table td:nth-child(1), .matrix-table th:nth-child(1) { 
+            position: sticky; left: 0; z-index: 15; 
+            width: 160px; min-width: 160px; 
+            background: #fff;
+        }
+        .matrix-table thead th:nth-child(1) { z-index: 25; background: #f8fafc;} 
+        
+        /* Sticky Left 2: Product Name */
+        .matrix-table td:nth-child(2), .matrix-table th:nth-child(2) { 
+            position: sticky; left: 160px; z-index: 15; 
+            width: 300px; min-width: 300px; 
+            border-right: 2px solid #94a3b8; 
+            box-shadow: 2px 0 5px -2px rgba(0,0,0,0.05);
+            background: #fff;
+        }
+        .matrix-table thead th:nth-child(2) { z-index: 25; background: #f8fafc; border-right: 2px solid #94a3b8;}
+
+        /* Sticky Right: Total */
+        .matrix-table td:last-child, .matrix-table th:last-child { 
+            position: sticky; right: 0; z-index: 15; 
+            width: 120px; min-width: 120px; 
+            background: #f1f5f9; 
+            border-left: 2px solid #94a3b8; 
+            box-shadow: -2px 0 5px -2px rgba(0,0,0,0.05); 
+            font-weight: bold; text-align: center; color: var(--primary); 
+        }
+        .matrix-table thead th:last-child { z-index: 25; background: #e2e8f0; color: var(--text-main); border-left: 2px solid #94a3b8;}
+
+        /* Matrix Inputs */
+        .matrix-input { 
+            width: 70px; 
+            text-align: center; 
+            border: 1px solid #cbd5e1;
+            border-radius: 6px; 
+            padding: 0.4rem; 
+            outline: none; 
+            font-weight: 700; 
+            color: var(--text-main); 
+            transition: all 0.2s; 
+        }
+        .matrix-input:focus { 
+            border-color: var(--primary); 
+            background: #fff; 
+            box-shadow: 0 0 0 3px rgba(37,99,235,0.15); 
+            transform: scale(1.05);
+        }
+        .matrix-input.is-zero { 
+            color: #94a3b8; 
+            font-weight: 400; 
+            background: #f8fafc;
+            border-color: transparent; 
+        }
+        .matrix-input:hover:not(:focus) { 
+            border-color: #94a3b8; 
+            background: #fff;
+        }
+        
+        /* Hide Arrows for Number Inputs */
+        .matrix-input::-webkit-outer-spin-button, .matrix-input::-webkit-inner-spin-button { 
+            -webkit-appearance: none; margin: 0; 
+        }
+
+        /* ================= MODAL CSS ================= */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(15, 23, 42, 0.5); backdrop-filter: blur(4px);
+            display: flex; align-items: center; justify-content: center; z-index: 9999;
+            opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+        }
+        .modal-overlay.active {
+            opacity: 1; pointer-events: auto;
+        }
+        .modal-content {
+            background: white; border-radius: 20px; width: 100%; max-width: 450px;
+            padding: 2rem; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            transform: translateY(20px); transition: transform 0.3s ease;
+            border: 1px solid var(--border-color);
+        }
+        .modal-overlay.active .modal-content {
+            transform: translateY(0);
+        }
+
+        /* DASHBOARD CARDS */
+        .kpi-card {
+            border-radius: 16px; padding: 1.5rem; 
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid var(--border-color);
+            display: flex; flex-direction: column; justify-content: center;
+            color: white; 
+        }
+        .kpi-value { font-size: 2rem; font-weight: 800; line-height: 1.2; }
+        .kpi-title { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9; }
+        
+        .bg-primary-grad { background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); }
+        .bg-success-grad { background: linear-gradient(135deg, #10b981 0%, #047857 100%); }
+        .bg-info-grad { background: linear-gradient(135deg, #0ea5e9 0%, #0369a1 100%); }
+        .bg-warning-grad { background: linear-gradient(135deg, #f59e0b 0%, #b45309 100%); }
+
+        .alert-card {
+            background: #fff; border-radius: 16px; padding: 1.25rem; 
+            border: 1px solid var(--danger-bg); box-shadow: 0 4px 15px -3px rgba(239, 68, 68, 0.1);
+        }
+        .alert-card h4 { color: var(--danger); font-weight: bold; margin-bottom: 0.75rem; font-size: 0.95rem; border-bottom: 1px solid var(--danger-bg); padding-bottom: 0.5rem; }
+
+        /* Utility */
+        .hidden { display: none !important; }
+        .flex { display: flex; } .justify-between { justify-content: space-between; } .gap-2 { gap: 0.5rem; }
+    </style>
+</head>
+<body>
+
+    <div class="app-layout">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <h2 style="color: #fff;">📦 FG Forecast</h2>
+                <p>Management System</p>
+            </div>
+            <div class="nav-links">
+                
+                <button class="nav-btn active" onclick="switchPage('page-report', 'Executive Dashboard')"><span>📈</span> Dashboard</button>
+                
+                <button class="nav-btn" onclick="switchPage('page-master-data', 'จัดการข้อมูลหลัก (Master Data)')"><span>🗄️</span> Master Data</button>
+
+                <div class="nav-dropdown">
+                    <button class="nav-btn nav-dropdown-toggle" onclick="toggleDropdown(this)">
+                        <div style="display:flex; align-items:center; gap:0.75rem;"><span>📝</span> Planning</div>
+                        <span class="dropdown-arrow">▼</span>
+                    </button>
+                    <div class="nav-submenu">
+                        <button class="nav-btn sub-nav-btn" onclick="switchPage('page-marketing-matrix', 'สร้าง Forecast รวมสาขา (Matrix)')">ทำ Forecast (แบบ Matrix)</button>
+                        <button class="nav-btn sub-nav-btn" onclick="switchPage('page-forecast', 'สร้างแผนรายสาขา (ดั้งเดิม)')">ทำ Forecast (รายสาขา)</button>
+                        <button class="nav-btn sub-nav-btn" onclick="switchPage('page-fc-history', 'ประวัติเอกสาร Forecast')">ประวัติเอกสาร Forecast</button>
+                    </div>
+                </div>
+
+                <div class="nav-dropdown">
+                    <button class="nav-btn nav-dropdown-toggle" onclick="toggleDropdown(this)">
+                        <div style="display:flex; align-items:center; gap:0.75rem;"><span>🏭</span> Production</div>
+                        <span class="dropdown-arrow">▼</span>
+                    </button>
+                    <div class="nav-submenu">
+                        <button class="nav-btn sub-nav-btn" onclick="switchPage('page-production-calc', 'คำนวณยอดสั่งผลิต (Production Plan)')">คำนวณเป้าหมายผลิต</button>
+                        <button class="nav-btn sub-nav-btn" onclick="switchPage('page-production-job', 'บันทึกการผลิตจริง (Actual Production)')">บันทึกการผลิตจริง</button>
+                        <button class="nav-btn sub-nav-btn" onclick="switchPage('page-production-history', 'ประวัติแผนผลิต (Production History)')">ประวัติแผนผลิต</button>
+                    </div>
+                </div>
+
+                <div class="nav-dropdown">
+                    <button class="nav-btn nav-dropdown-toggle" onclick="toggleDropdown(this)">
+                        <div style="display:flex; align-items:center; gap:0.75rem;"><span>🏢</span> Branch Request</div>
+                        <span class="dropdown-arrow">▼</span>
+                    </button>
+                    <div class="nav-submenu">
+                        <button class="nav-btn sub-nav-btn" onclick="switchPage('page-branch', 'สร้างใบขอเบิกสินค้า')">สร้างใบขอเบิกสินค้า</button>
+                        <button class="nav-btn sub-nav-btn" onclick="switchPage('page-rq-history', 'ประวัติเอกสารใบเบิก')">ประวัติเอกสารใบเบิก</button>
+                    </div>
+                </div>
+
+                <button class="nav-btn" onclick="switchPage('page-warehouse', 'Warehouse Issue')"><span>🚚</span> Warehouse Issue</button>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <div class="main-wrapper">
+            <header class="topbar">
+                <h1 id="topbar-title">Executive Dashboard</h1>
+                <div class="user-info">👤 <strong>Admin User</strong> | All Branches</div>
+            </header>
+
+            <!-- SINGLE CLEAR MAIN CONTAINER -->
+            <main class="content-area">
+
+                <!-- ================= PAGE -1: MASTER DATA ================= -->
+                <div id="page-master-data" class="page">
+                    <div style="display: flex; flex-direction: column; gap: 2rem;">
+                        
+                        <!-- สาขา (Branches) -->
+                        <div class="card" style="border-radius: 24px; box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05); border: 1px solid var(--border-color); margin-bottom: 0;">
+                            <div class="card-header" style="border-bottom: none; margin-bottom: 0.5rem; display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem;">
+                                <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
+                                    <h2 style="font-size: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
+                                        <span>🏪</span> จัดการสาขา (Branches)
+                                    </h2>
+                                    <div style="display: flex; gap: 0.5rem;">
+                                        <button class="btn btn-secondary btn-sm" onclick="deleteAllMasterBranches()" style="border-radius: 8px; background: white; color: var(--danger); border: 1px solid var(--danger);">
+                                            🗑️ ลบทั้งหมด
+                                        </button>
+                                        <button class="btn btn-primary btn-sm" onclick="openBranchModal()" style="border-radius: 8px;">
+                                            + เพิ่มสาขา
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>ลำดับ</th>
+                                            <th>รหัสสาขา</th>
+                                            <th>ชื่อสาขา</th>
+                                            <th>ประเภท</th>
+                                            <th style="width: 100px; text-align: center;">จัดการ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="master-branch-body">
+                                        <!-- Rendered by JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- สินค้า (Products) -->
+                        <div class="card" style="border-radius: 24px; box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05); border: 1px solid var(--border-color); margin-bottom: 0;">
+                            <div class="card-header" style="border-bottom: none; margin-bottom: 0.5rem; display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem;">
+                                <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
+                                    <h2 style="font-size: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
+                                        <span>📦</span> จัดการสินค้า (Products)
+                                    </h2>
+                                    <div style="display: flex; gap: 0.5rem;">
+                                        <button class="btn btn-secondary btn-sm" onclick="deleteAllMasterProducts()" style="border-radius: 8px; background: white; color: var(--danger); border: 1px solid var(--danger);">
+                                            🗑️ ลบทั้งหมด
+                                        </button>
+                                        <input type="file" id="master-prod-import-file" accept=".xlsx, .xls" style="display: none;" onchange="processMasterProductImport(event)">
+                                        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('master-prod-import-file').click()" style="border-radius: 8px; background: white;">
+                                            <span>📥</span> Import
+                                        </button>
+                                        <button class="btn btn-primary btn-sm" onclick="openProductModal()" style="border-radius: 8px;">
+                                            + เพิ่มสินค้า
+                                        </button>
+                                    </div>
+                                </div>
+                                <div style="font-size: 0.75rem; color: var(--secondary); background: #f8fafc; padding: 0.35rem 0.75rem; border-radius: 6px; border: 1px solid var(--border-color); width: 100%;">
+                                    💡 <b>รูปแบบ Excel:</b> ต้องมีหัวคอลัมน์ <b>SKU</b> หรือ <b>รหัส</b> และ <b>Name</b> หรือ <b>ชื่อ</b> (คอลัมน์ <b>Category</b> และ <b>Unit</b> จะมีหรือไม่มีก็ได้)
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>SKU</th>
+                                            <th>ชื่อสินค้า</th>
+                                            <th>หมวดหมู่</th>
+                                            <th>หน่วยนับ</th>
+                                            <th style="width: 100px; text-align: center;">จัดการ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="master-product-body">
+                                        <!-- Rendered by JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- ================= PAGE 0: MARKETING MATRIX FORECAST ================= -->
+                <div id="page-marketing-matrix" class="page">
+                    <div class="card" style="border-radius: 24px; box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05); border: 1px solid var(--border-color); padding: 1.5rem 1.5rem 2rem 1.5rem;">
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem;">
+                            <div>
+                                <h2 style="font-size: 1.4rem; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                                    <span>📊</span> ตาราง Forecast รวมทุกสาขา
+                                </h2>
+                                <p style="color: var(--secondary); font-size: 0.85rem;">ทำเอกสารเดียวจบ คำนวณ Total ให้อัตโนมัติ (ใส่เลข 0 ได้หากไม่ต้องการขายสาขานั้น)</p>
+                            </div>
+                            <!-- AREA: Import Buttons and Hints -->
+                            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem;">
+                                <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; justify-content: flex-end;">
+                                    <input type="file" id="matrix-import-file" accept=".xlsx, .xls" style="display: none;" onchange="processMatrixExcelImport(event)">
+                                    <button class="btn btn-secondary btn-sm" onclick="document.getElementById('matrix-import-file').click()" style="border-radius: 8px; background: white; padding: 0.5rem 1rem;">
+                                        <span>📥</span> Import (Excel)
+                                    </button>
+
+                                    <button class="btn btn-secondary btn-sm" onclick="renderMarketingMatrix(false)" style="border-radius: 8px; background: white; padding: 0.5rem 1rem;">
+                                        <span style="font-size:1rem">🔄</span> ล้างข้อมูล
+                                    </button>
+                                    <button class="btn btn-primary" onclick="saveMatrixForecast();" style="border-radius: 8px; box-shadow: 0 4px 15px -3px rgba(37, 99, 235, 0.4); padding: 0.5rem 1.5rem;">
+                                        บันทึกแผนประจำงวด
+                                    </button>
+                                </div>
+                                <div style="font-size: 0.75rem; color: var(--secondary); background: #f8fafc; padding: 0.35rem 0.75rem; border-radius: 6px; border: 1px solid var(--border-color);">
+                                    💡 <b>รูปแบบ Excel:</b> ต้องมีหัวคอลัมน์เป็น <b>SKU</b> และ <b>รหัสสาขา</b> (เช่น BKK-01, CNX-01) 
+                                    <a href="javascript:void(0)" onclick="alert('ตัวอย่างรูปแบบคอลัมน์ใน Excel ที่ถูกต้อง:\n\n| SKU | BKK-01 | CNX-01 | HKT-01 |\n| FG-A001 | 500 | 200 | 100 |\n\n* ระบบจะนำตัวเลขจากคอลัมน์รหัสสาขา มาเติมลงในตารางให้ตรงกับ SKU อัตโนมัติ')" style="color: var(--primary); text-decoration: underline; margin-left: 0.25rem;">ดูตัวอย่าง</a>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="background: #f8fafc; padding: 1.25rem; border-radius: 16px; border: 1px solid var(--border-color); margin-bottom: 1.5rem;">
+                            <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 0;">
+                                <div class="form-group">
+                                    <label style="color: var(--secondary); font-size: 0.75rem; text-transform: uppercase;">Doc ID</label>
+                                    <input type="text" readonly value="FC-MTX-Auto" style="background: #e2e8f0; border: 1px solid var(--border-color); font-weight: bold; color: var(--secondary); padding: 0.6rem;">
+                                </div>
+                                <div class="form-group">
+                                    <label style="color: var(--secondary); font-size: 0.75rem; text-transform: uppercase;">รอบการขาย (Period) <span style="color: var(--danger);">*</span></label>
+                                    <input type="month" id="matrix-period" value="2026-04" style="border-radius: 8px; border: 1px solid var(--border-color); padding: 0.6rem;">
+                                </div>
+                                <div class="form-group">
+                                    <label style="color: var(--secondary); font-size: 0.75rem; text-transform: uppercase;">ผู้รับผิดชอบ</label>
+                                    <input type="text" value="Marketing Manager" readonly style="background: #e2e8f0; border: 1px solid var(--border-color); color: var(--secondary); padding: 0.6rem;">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- THE MATRIX TABLE -->
+                        <div class="matrix-container">
+                            <table class="matrix-table">
+                                <thead>
+                                    <tr id="matrix-thead-tr">
+                                        <!-- Rendered by JS -->
+                                    </tr>
+                                </thead>
+                                <tbody id="matrix-tbody">
+                                    <!-- Rendered by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                    </div>
+                </div>
+
+                <!-- ================= PAGE 1: FORECAST (PLANNING - LEGACY) ================= -->
+                <div id="page-forecast" class="page">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>สร้างแผนสั่งผลิต (รายสาขา)</h2>
+                            <div>
+                                <button class="btn btn-secondary" onclick="resetForecastForm()">เคลียร์ฟอร์ม</button>
+                                <button class="btn btn-primary" onclick="saveForecast('Draft')" id="btn-save-draft">Save Draft</button>
+                                <button class="btn btn-success" onclick="saveForecast('Approved')" id="btn-approve">Approve Forecast</button>
+                            </div>
+                        </div>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Forecast ID (Auto)</label>
+                                <input type="text" id="fc_id" readonly placeholder="ระบบสร้างอัตโนมัติ">
+                            </div>
+                            <div class="form-group">
+                                <label>สาขาเป้าหมาย (Branch)</label>
+                                <select id="fc_branch">
+                                    <!-- Populated by JS -->
+                                </select>
+                            </div>
+                            <div class="form-group" style="grid-column: span 2;">
+                                <label>ช่วงเวลา (Period)</label>
+                                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                    <input type="date" id="fc_period_start" style="width: 100%;">
+                                    <span style="color: var(--text-muted); font-weight: 500;">ถึง</span>
+                                    <input type="date" id="fc_period_end" style="width: 100%;">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>ผู้สร้าง (Created By)</label>
+                                <input type="text" id="fc_creator" value="Planner Team">
+                            </div>
+                        </div>
+
+                        <div class="card-header" style="margin-top: 2rem; border-top: 1px solid var(--border-color); padding-top: 1.5rem;">
+                            <h3>รายการสินค้าสั่งผลิต (Items)</h3>
+                            <button class="btn btn-secondary btn-sm" onclick="addForecastItemRow()">+ เพิ่มสินค้า</button>
+                        </div>
+                        <div class="table-responsive">
+                            <table id="fc_items_table">
+                                <thead>
+                                    <tr>
+                                        <th>SKU (ดึงจาก Master Data)</th>
+                                        <th>ชื่อสินค้า (Auto Fill)</th>
+                                        <th width="180">Forecast Qty (จำนวนผลิต)</th>
+                                        <th width="100">จัดการ</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fc_items_body">
+                                    <!-- Rows added dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= PAGE 1.5: FORECAST HISTORY ================= -->
+                <div id="page-fc-history" class="page">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>ประวัติเอกสาร Forecast ทั้งหมด</h2>
+                        </div>
+                        <div class="table-responsive">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Forecast ID</th>
+                                        <th>สาขาเป้าหมาย</th>
+                                        <th>ช่วงเวลา</th>
+                                        <th>สถานะเอกสาร</th>
+                                        <th>จัดการ</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fc_list_body">
+                                    <!-- Rendered by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= PAGE 1.8: PRODUCTION - CALC TARGET ================= -->
+                <div id="page-production-calc" class="page">
+                    <div class="card" style="border-radius: 24px; box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05); border: 1px solid var(--border-color);">
+                        <div class="card-header" style="border-bottom: none; margin-bottom: 0.5rem;">
+                            <h2 style="font-size: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
+                                <span>🎯</span> คำนวณเป้าหมายสั่งผลิต (Production Target)
+                            </h2>
+                        </div>
+                        
+                        <div style="background: #f8fafc; padding: 1.5rem; border-radius: 16px; border: 1px solid var(--border-color); margin-bottom: 1.5rem;">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label style="color: var(--secondary); font-size: 0.8rem; text-transform: uppercase;">อ้างอิงรอบการขาย (Forecast Period) <span style="color: var(--danger);">*</span></label>
+                                    <select id="prod_period_select" onchange="loadProductionCalcItems()" style="border-radius: 12px; padding: 0.75rem; border: 1px solid var(--border-color); box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">
+                                        <option value="">-- เลือกรอบการขาย (Period) เพื่อคำนวณ --</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Load items dynamically based on selected Forecast Period -->
+                        <div id="prod_calc_items_container" style="display: none; animation: fadeIn 0.3s ease-in-out;">
+                            
+                            <!-- SUMMARY CARDS FOR CALCULATION -->
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                                <div class="kpi-card" style="border-bottom: 4px solid var(--secondary); padding: 1rem;">
+                                    <div class="kpi-title" style="color: var(--secondary);">Total Forecast (A)</div>
+                                    <div class="kpi-value" id="calc-total-fc" style="color: var(--text-main); font-size: 1.75rem;">0</div>
+                                </div>
+                                <div class="kpi-card" style="border-bottom: 4px solid var(--danger); padding: 1rem;">
+                                    <div class="kpi-title" style="color: var(--danger);">Current Stock (B)</div>
+                                    <div class="kpi-value" id="calc-total-stock" style="color: var(--text-main); font-size: 1.75rem;">0</div>
+                                </div>
+                                <div class="kpi-card" style="border-bottom: 4px solid var(--warning); padding: 1rem;">
+                                    <div class="kpi-title" style="color: var(--warning);">Buffer Stock (C)</div>
+                                    <div class="kpi-value" id="calc-total-buffer" style="color: var(--text-main); font-size: 1.75rem;">0</div>
+                                </div>
+                                <div class="kpi-card" style="border-bottom: 4px solid var(--primary); padding: 1rem; background: var(--primary-light);">
+                                    <div class="kpi-title" style="color: var(--primary);">Net Target (A - B + C)</div>
+                                    <div class="kpi-value" id="calc-total-target" style="color: var(--primary); font-size: 2rem;">0</div>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; background: #fff; padding: 1rem 1.5rem; border-radius: 12px; border: 1px solid var(--border-color);">
+                                <div>
+                                    <h3 style="font-size: 1.1rem; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                                        <span>⚙️</span> รายละเอียดการคำนวณรายสินค้า
+                                    </h3>
+                                    <p style="font-size: 0.8rem; color: var(--secondary);">ระบุสต็อกคงเหลือและ Buffer เพื่อคำนวณเป้ายอดสั่งผลิตสุทธิ (รวมทุกสาขา)</p>
+                                </div>
+                                <button class="btn btn-primary" onclick="saveProductionPlan()" style="border-radius: 12px; padding: 0.75rem 1.5rem; box-shadow: 0 4px 15px -3px rgba(37, 99, 235, 0.4); font-size: 1rem;">
+                                    บันทึกแผนผลิต
+                                </button>
+                            </div>
+                            
+                            <div class="table-responsive" style="border-radius: 12px; overflow-y: auto; max-height: 50vh; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+                                <table style="width: 100%; border-collapse: collapse; margin-bottom: 0;">
+                                    <thead style="background: #f8fafc; border-bottom: 2px solid var(--border-color);">
+                                        <tr>
+                                            <th style="padding: 0.75rem 1rem; text-align: left; width: 30%;">SKU / ชื่อสินค้า</th>
+                                            <th style="text-align: center; padding: 0.75rem 1rem; width: 15%;">ยอดรวม Forecast (A)</th>
+                                            <th style="text-align: center; width: 15%; padding: 0.75rem 1rem; background: var(--danger-bg); color: #000;">สต็อกคงเหลือ (B)</th>
+                                            <th style="text-align: center; width: 25%; padding: 0.75rem 1rem; background: var(--warning-bg); color: #000;">Buffer Stock (C)</th>
+                                            <th style="text-align: center; padding: 0.75rem 1rem; background: var(--primary-light); color: var(--primary);">เป้าผลิตรวม (Target)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="prod_calc_items_body">
+                                        <!-- Rendered by JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= PAGE 1.9: PRODUCTION - ACTUAL JOB ================= -->
+                <div id="page-production-job" class="page">
+                    <div class="card" style="border-radius: 24px; box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05); border: 1px solid var(--border-color);">
+                        <div class="card-header" style="border-bottom: none; margin-bottom: 0.5rem;">
+                            <h2 style="font-size: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
+                                <span>📝</span> บันทึกการผลิตจริง (Record Actual Production)
+                            </h2>
+                        </div>
+                        
+                        <div style="background: #fff; padding: 1.5rem; border-radius: 16px; border: 1px solid var(--border-color); margin-bottom: 1.5rem;">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label style="color: var(--secondary); font-size: 0.8rem; text-transform: uppercase;">เลือกแผนผลิต (Production ID) <span style="color: var(--danger);">*</span></label>
+                                    <select id="prod_job_select" onchange="loadProductionJobItems()" style="border-radius: 12px; padding: 0.75rem; border: 1px solid var(--border-color); box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); background: #f8fafc;">
+                                        <option value="">-- เลือกแผนผลิตที่กำลังดำเนินการ --</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Load items dynamically based on selected PR -->
+                        <div id="prod_job_items_container" style="display: none; animation: fadeIn 0.3s ease-in-out;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                                <div>
+                                    <h3 style="font-size: 1.1rem; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem;">
+                                        <span>🛠️</span> บันทึกยอดรับเข้า (ทีละรายการ)
+                                    </h3>
+                                </div>
+                            </div>
+                            
+                            <div class="table-responsive">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>SKU / ชื่อสินค้า</th>
+                                            <th style="text-align: center;">เป้าหมาย (Target)</th>
+                                            <th style="text-align: center;">ผลิตสะสม (Done)</th>
+                                            <th style="text-align: center;">คงเหลือ (Remaining)</th>
+                                            <th style="text-align: center; width: 230px; background: #f8fafc; color: var(--primary);">ผลิตเพิ่มรอบนี้</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="prod_job_items_body">
+                                        <!-- Rendered by JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= PAGE 1.10: PRODUCTION - HISTORY ================= -->
+                <div id="page-production-history" class="page">
+                    <div class="card" style="border-radius: 24px;">
+                        <div class="card-header">
+                            <h2 style="display: flex; align-items: center; gap: 0.5rem;"><span>🗂️</span> ประวัติแผนสั่งผลิต (Production History)</h2>
+                        </div>
+                        <div class="table-responsive">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Production ID</th>
+                                        <th>รอบการขาย (Period)</th>
+                                        <th>วันที่สร้างแผน</th>
+                                        <th>ความคืบหน้าภาพรวม</th>
+                                        <th>สถานะ</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="prod_list_body">
+                                    <!-- Rendered by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= PAGE 2: BRANCH REQUEST ================= -->
+                <div id="page-branch" class="page">
+                    <!-- Create Request Form -->
+                    <div class="card" style="border-radius: 24px; box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05); border: 1px solid var(--border-color);">
+                        <div class="card-header" style="border-bottom: none; margin-bottom: 0.5rem;">
+                            <h2 style="font-size: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
+                                <span>📄</span> สร้างใบขอเบิกสินค้า (New Branch Request)
+                            </h2>
+                            <button class="btn btn-secondary" onclick="resetRequestForm()" style="border-radius: 12px;">ยกเลิก / รีเซ็ต</button>
+                        </div>
+                        
+                        <div style="background: #f8fafc; padding: 1.5rem; border-radius: 16px; border: 1px solid var(--border-color); margin-bottom: 1.5rem;">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label style="color: var(--secondary); font-size: 0.8rem; text-transform: uppercase;">Request ID (Auto)</label>
+                                    <input type="text" id="rq_id" readonly placeholder="ระบบสร้างอัตโนมัติ" style="background: #e2e8f0; border: 1px solid var(--border-color); font-weight: bold; color: var(--secondary);">
+                                </div>
+                                <div class="form-group">
+                                    <label style="color: var(--secondary); font-size: 0.8rem; text-transform: uppercase;">อ้างอิง Forecast สาขา <span style="color: var(--danger);">*</span></label>
+                                    <select id="br_fc_select" onchange="loadForecastForRequest()" style="border-radius: 12px; padding: 0.75rem; border: 1px solid var(--border-color); box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">
+                                        <option value="">-- เลือก Forecast ID เพื่อดึงข้อมูล --</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label style="color: var(--secondary); font-size: 0.8rem; text-transform: uppercase;">วันที่เบิก</label>
+                                    <input type="date" id="rq_date" value="2026-03-01" style="border-radius: 12px; padding: 0.75rem; border: 1px solid var(--border-color); box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Load items dynamically based on selected Forecast -->
+                        <div id="br_items_container" style="display: none; animation: fadeIn 0.3s ease-in-out;">
+                            <!-- UPDATED HEADER WITH IMPORT BUTTON -->
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; background: #fff; padding: 1rem 1.5rem; border-radius: 12px; border: 1px solid var(--border-color);">
+                                <div>
+                                    <h3 style="font-size: 1.1rem; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                                        <span>📦</span> ระบุจำนวนเบิกจริง
+                                    </h3>
+                                    <div style="font-size: 0.75rem; color: var(--secondary);">
+                                        💡 <b>รูปแบบ Excel/PDF:</b> ต้องมีคอลัมน์ชื่อ <b>SKU</b> และคอลัมน์ <b>จำนวน (Qty)</b>
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 0.75rem;">
+                                    <button class="btn btn-secondary" onclick="addUnplannedRequestItem()" style="border-radius: 12px; background: white; border-color: var(--danger); color: var(--danger);">
+                                        <span>+</span> เพิ่มสินค้านอกแผน
+                                    </button>
+                                    <input type="file" id="br-import-file" accept=".xlsx, .xls, .pdf" style="display: none;" onchange="processBranchRequestImport(event)">
+                                    <button class="btn btn-secondary" onclick="document.getElementById('br-import-file').click()" style="border-radius: 12px; background: white;">
+                                        <span>📥</span> Import (Excel/PDF)
+                                    </button>
+                                    <button class="btn btn-primary" onclick="saveBranchRequest()" style="border-radius: 12px; box-shadow: 0 4px 15px -3px rgba(37, 99, 235, 0.4); font-size: 1rem;">
+                                        บันทึกเอกสารใบเบิก
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Custom Item List View changed to Table -->
+                            <div class="table-responsive" style="border-radius: 12px; overflow-y: auto; max-height: 50vh; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+                                <table style="width: 100%; border-collapse: collapse; margin-bottom: 0;">
+                                    <thead style="background: #f8fafc; border-bottom: 2px solid var(--border-color);">
+                                        <tr>
+                                            <th style="padding: 1rem; text-align: left; width: 15%;">SKU</th>
+                                            <th style="padding: 1rem; text-align: left; width: 35%;">ชื่อสินค้า</th>
+                                            <th style="text-align: center; padding: 1rem; width: 25%;">แผนผลิต (Forecast)</th>
+                                            <th style="text-align: center; padding: 1rem; width: 25%; background: var(--primary-light); color: var(--primary);">ขอเบิกจริง (Request Qty)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="br_items_body">
+                                        <!-- Rendered by JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= PAGE 2.5: REQUEST HISTORY ================= -->
+                <div id="page-rq-history" class="page">
+                    <div class="card" style="border-radius: 24px;">
+                        <div class="card-header">
+                            <h2 style="display: flex; align-items: center; gap: 0.5rem;"><span>🗂️</span> ประวัติเอกสารใบเบิก (Request History)</h2>
+                        </div>
+                        <div class="table-responsive">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Request ID</th>
+                                        <th>Ref. Forecast ID</th>
+                                        <th>สาขา</th>
+                                        <th>วันที่สร้าง</th>
+                                        <th>สถานะการเบิก</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rq_list_body">
+                                    <!-- Rendered by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= PAGE 3: WAREHOUSE ISSUE ================= -->
+                <div id="page-warehouse" class="page">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>บันทึกการจัดจ่ายสินค้า (Warehouse Issue)</h2>
+                        </div>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>เลือกเอกสารใบเบิก (Request ID)</label>
+                                <select id="wh_rq_select" onchange="loadRequestForIssue()">
+                                    <option value="">-- เลือก Request ID --</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card" id="wh_items_container" style="display: none;">
+                        <div class="card-header">
+                            <h3 id="wh_title">รายการจัดส่ง</h3>
+                            <button class="btn btn-success" onclick="saveWarehouseIssue()">บันทึกการจัดส่งยอด & อัปเดตสถานะ</button>
+                        </div>
+                        <div style="margin-bottom: 1rem; display: flex; gap: 1rem; font-size: 0.85rem;">
+                            <span class="status-badge" style="background: var(--success-bg); color: var(--success); border: 1px solid #bbf7d0;">เขียว = จ่ายครบ (อ้างอิง Forecast)</span>
+                            <span class="status-badge" style="background: var(--danger-bg); color: var(--danger); border: 1px solid #fecaca;">แดง = จ่ายขาด (Issue < Forecast)</span>
+                            <span class="status-badge" style="background: var(--warning-bg); color: #d97706; border: 1px solid #fde68a;">เหลือง = จ่ายเกิน (Issue > Forecast)</span>
+                        </div>
+                        <div class="table-responsive">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>SKU</th>
+                                        <th>ชื่อสินค้า</th>
+                                        <th>แผนผลิต (Forecast)</th>
+                                        <th>ยอดขอเบิก (Request)</th>
+                                        <th>จ่ายจริง (Issued Qty)</th>
+                                        <th>ส่วนต่าง (Iss - FC)</th>
+                                        <th>สถานะย่อย</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="wh_items_body">
+                                    <!-- Rendered by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= PAGE 4: EXECUTIVE DASHBOARD ================= -->
+                <div id="page-report" class="page active">
+                    <div style="margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 1rem;">
+                        <div>
+                            <h2 style="font-size: 1.6rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem;">📊 Executive Dashboard</h2>
+                            <p style="color: var(--secondary); font-size: 0.9rem;">สรุปภาพรวมความแม่นยำของการพยากรณ์และการจัดส่งสินค้า</p>
+                        </div>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button class="btn btn-secondary btn-sm" onclick="resetDashboardFilters()" style="background: white; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                                🔄 รีเซ็ตตัวกรอง
+                            </button>
+                            <button class="btn btn-danger btn-sm" onclick="clearForecastData()" style="border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                                🗑️ ล้างข้อมูลเอกสารทั้งหมด
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Filters -->
+                    <div class="card" style="border-radius: 16px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; border: 1px solid var(--border-color);">
+                        <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 0; gap: 1rem;">
+                            <div class="form-group">
+                                <label style="font-size: 0.75rem; text-transform: uppercase;">รอบการขาย (Period)</label>
+                                <select id="dash_period_filter" onchange="renderReport()" style="border-radius: 8px; border: 1px solid var(--border-color); background: #f8fafc;"></select>
+                            </div>
+                            <div class="form-group">
+                                <label style="font-size: 0.75rem; text-transform: uppercase;">สาขา (Branch)</label>
+                                <select id="dash_branch_filter" onchange="renderReport()" style="border-radius: 8px; border: 1px solid var(--border-color); background: #f8fafc;"></select>
+                            </div>
+                            <div class="form-group">
+                                <label style="font-size: 0.75rem; text-transform: uppercase;">สินค้า (SKU)</label>
+                                <select id="dash_sku_filter" onchange="renderReport()" style="border-radius: 8px; border: 1px solid var(--border-color); background: #f8fafc;"></select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- KPI Cards -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                        <div class="kpi-card bg-primary-grad">
+                            <div class="kpi-title" style="color: rgba(255,255,255,0.8);">เป้าหมายรวม (Total Forecast)</div>
+                            <div class="kpi-value" id="kpi-forecast" style="color: white;">0</div>
+                        </div>
+                        <div class="kpi-card bg-success-grad">
+                            <div class="kpi-title" style="color: rgba(255,255,255,0.8);">จัดส่งจริงรวม (Total Issued)</div>
+                            <div class="kpi-value" id="kpi-issued" style="color: white;">0</div>
+                        </div>
+                        <div class="kpi-card bg-info-grad">
+                            <div class="kpi-title" style="color: rgba(255,255,255,0.8);">ความแม่นยำ (Accuracy)</div>
+                            <div class="kpi-value" id="kpi-accuracy" style="color: white;">0%</div>
+                        </div>
+                        <div class="kpi-card bg-warning-grad">
+                            <div class="kpi-title" style="color: rgba(255,255,255,0.8);">รายการที่ยังไม่จบ (Pending)</div>
+                            <div class="kpi-value" id="kpi-pending" style="color: white;">0</div>
+                        </div>
+                    </div>
+
+                    <!-- Alerts Section -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                        <div class="alert-card">
+                            <h4>🚨 Top 3 สินค้าส่งขาด (Shortage)</h4>
+                            <div id="alert-shortage-list" style="font-size: 0.9rem; color: var(--text-main); display: flex; flex-direction: column; gap: 0.5rem;">
+                                <!-- Rendered via JS -->
+                            </div>
+                        </div>
+                        <div class="alert-card" style="border-color: #fde68a;">
+                            <h4 style="color: #d97706; border-bottom-color: #fef3c7;">⚠️ Top 3 สาขาคลาดเคลื่อนสูง (High Diff)</h4>
+                            <div id="alert-diff-list" style="font-size: 0.9rem; color: var(--text-main); display: flex; flex-direction: column; gap: 0.5rem;">
+                                <!-- Rendered via JS -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Main Table -->
+                    <div class="card" style="border-radius: 16px; overflow: hidden; padding: 0; border: 1px solid var(--border-color);">
+                        <div style="padding: 1rem 1.5rem; background: #f8fafc; border-bottom: 1px solid var(--border-color);">
+                            <h3 style="font-size: 1rem; font-weight: bold; color: var(--text-main); margin: 0;">รายละเอียด Forecast vs Issued (รายรายการ)</h3>
+                        </div>
+                        <div class="table-responsive" style="border: none; border-radius: 0; max-height: 500px; overflow-y: auto;">
+                            <table style="margin-top: 0; border: none;">
+                                <thead style="position: sticky; top: 0; z-index: 10;">
+                                    <tr>
+                                        <th style="border-top: none;">SKU</th>
+                                        <th style="border-top: none;">ชื่อสินค้า</th>
+                                        <th style="border-top: none;">สาขา</th>
+                                        <th style="text-align: right; border-top: none;">Forecast Qty</th>
+                                        <th style="text-align: right; border-top: none;">Issued Qty</th>
+                                        <th style="text-align: right; border-top: none;">Diff Qty</th>
+                                        <th style="text-align: right; border-top: none;">Diff %</th>
+                                        <th style="text-align: center; border-top: none;">สถานะ (Status)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rpt_body">
+                                    <!-- Rendered by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+            </main>
+        </div>
+    </div>
+
+    <!-- ================= GLOBAL MODAL (HIDDEN) ================= -->
+    <div id="app-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:1rem; margin-bottom:1.5rem;">
+                <h3 id="modal-title" style="font-size:1.25rem; font-weight:bold; color:var(--text-main); margin:0;">Title</h3>
+                <button onclick="closeModal()" style="background:none; border:none; font-size:1.5rem; cursor:pointer; color:var(--secondary); line-height: 1;">&times;</button>
+            </div>
+            <div id="modal-body"></div>
+            <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:2rem;">
+                <button class="btn btn-secondary" onclick="closeModal()" style="border-radius: 8px;">ยกเลิก</button>
+                <button class="btn btn-primary" id="modal-save-btn" style="border-radius: 8px; box-shadow: 0 4px 15px -3px rgba(37, 99, 235, 0.4);">บันทึก</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= JAVASCRIPT LOGIC ================= -->
+    <script>
+        // --- 3. UI Helpers (นำกลับมาให้ครบถ้วน) ---
+        function generateId(prefix) {
+            const date = new Date();
+            const yyyymm = date.getFullYear() + String(date.getMonth() + 1).padStart(2, '0');
+            const random = Math.floor(Math.random() * 900) + 100;
+            return `${prefix}-${yyyymm}-${random}`;
+        }
+
+        function getStatusBadge(status) {
+            const map = {
+                'Draft': '<span class="status-badge status-draft">Draft</span>',
+                'Approved': '<span class="status-badge status-approved">Approved</span>',
+                'Closed': '<span class="status-badge status-closed">Closed</span>',
+                'Pending': '<span class="status-badge status-pending">Pending (รอจัดส่ง)</span>',
+                'Issued': '<span class="status-badge status-closed">Issued (จัดส่งแล้ว)</span>',
+                'Planned': '<span class="status-badge status-approved" style="background:#eff6ff; color:#1e40af;">Planned (กำลังผลิต)</span>',
+                'Completed': '<span class="status-badge status-closed">Completed (ผลิตครบ)</span>'
+            };
+            return map[status] || status;
+        }
+
+        // --- 1. State Management (Master Data + Mock Database) ---
+        window.db = {
+            branches: [],
+            products: [],
+            forecasts: [],
+            productions: [],
+            requests: [],
+            items: []
+        };
+        let db = window.db;
+
+        // ฟังก์ชันลบข้อมูล Forecast
+        window.clearForecastData = function() {
+           if(confirm('⚠️ คุณแน่ใจหรือไม่ว่าต้องการ "ล้างข้อมูล Forecast และประวัติที่เกี่ยวข้องทั้งหมด" ?\n(การกระทำนี้จะลบ แผนผลิต ใบเบิก และรายการทั้งหมด)')) {
+               db.forecasts = [];
+               db.productions = [];
+               db.requests = [];
+               db.items = [];
+               saveToDb();
+               alert("ล้างข้อมูลเรียบร้อยแล้ว");
+               if (window.refreshCurrentView) {
+                    window.refreshCurrentView();
+               }
+           }
+        }
+
+        // ฟังก์ชันอัปเดตข้อมูลขึ้น Firebase
+        function saveToDb() {
+            window.db = db; 
+            if (window.firebaseSave) {
+                window.firebaseSave(window.db);
+            }
+        }
+
+        // ฟังก์ชันรับข้อมูลจาก Firebase มาอัปเดตหน้าจอ
+        window.updateLocalDbFromFirebase = function(data) {
+            db.branches = data.branches || [];
+            db.products = data.products || [];
+            db.forecasts = data.forecasts || [];
+            db.productions = data.productions || [];
+            db.requests = data.requests || [];
+            db.items = data.items || [];
+            
+            if (window.refreshCurrentView) {
+                window.refreshCurrentView();
+            }
+        };
+
+        window.refreshCurrentView = function() {
+            refreshAllDropdowns();
+            const activePage = document.querySelector('.page.active');
+            if(activePage) {
+                const pageId = activePage.id;
+                if(pageId === 'page-master-data') renderMasterData();
+                if(pageId === 'page-marketing-matrix') renderMarketingMatrix(true);
+                if(pageId === 'page-forecast' || pageId === 'page-fc-history') renderForecastList();
+                if(pageId === 'page-production-calc') { populateProductionCalcDropdown(); loadProductionCalcItems(); }
+                if(pageId === 'page-production-job') { populateProductionJobDropdown(); loadProductionJobItems(); }
+                if(pageId === 'page-production-history') renderProductionList();
+                if(pageId === 'page-branch') { populateForecastForRequest(); loadForecastForRequest(); }
+                if(pageId === 'page-rq-history') renderRequestList();
+                if(pageId === 'page-warehouse') { populateRequestForIssue(); loadRequestForIssue(); }
+                if(pageId === 'page-report') renderReport();
+            }
+        };
+
+        // ฟังก์ชันสำหรับอัปเดต Dropdown สาขาทั่วทั้งระบบ จาก Master Data (db.branches)
+        function refreshAllDropdowns() {
+            const fcBranch = document.getElementById('fc_branch');
+            if(fcBranch) {
+                const currentFcBranch = fcBranch.value;
+                fcBranch.innerHTML = '<option value="">-- เลือกสาขา --</option>';
+                db.branches.forEach(b => {
+                    fcBranch.innerHTML += `<option value="${b.code}">${b.code} (${b.name})</option>`;
+                });
+                if(currentFcBranch) fcBranch.value = currentFcBranch;
+            }
+
+            populateDashboardFilters();
+        }
+
+        // --- 1.5. Modal Logic ---
+        function showModal(title, contentHtml, onSave) {
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-body').innerHTML = contentHtml;
+            
+            const saveBtn = document.getElementById('modal-save-btn');
+            const newSaveBtn = saveBtn.cloneNode(true);
+            saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+            newSaveBtn.addEventListener('click', onSave);
+
+            document.getElementById('app-modal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('app-modal').classList.remove('active');
+        }
+
+        // --- 2. Navigation & Dropdown Logic ---
+        function toggleDropdown(btn) {
+            btn.classList.toggle('open');
+            const submenu = btn.nextElementSibling;
+            submenu.classList.toggle('open');
+        }
+
+        function switchPage(pageId, titleName) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.nav-btn:not(.nav-dropdown-toggle)').forEach(b => b.classList.remove('active'));
+            
+            // Check if nav-btn element exists and has active class method before calling it. This prevents errors when called directly from JS without click event.
+            const targetPage = document.getElementById(pageId);
+            if (targetPage) {
+               targetPage.classList.add('active');
+            }
+            
+            if(event && event.currentTarget && event.currentTarget.classList && event.currentTarget.classList.contains('nav-btn')) {
+                event.currentTarget.classList.add('active');
+            }
+
+            if(titleName) {
+                const titleEl = document.getElementById('topbar-title');
+                if(titleEl) titleEl.innerText = titleName;
+            }
+
+            if(pageId === 'page-master-data') renderMasterData();
+            if(pageId === 'page-marketing-matrix') renderMarketingMatrix(false);
+            if(pageId === 'page-forecast' || pageId === 'page-fc-history') renderForecastList();
+            if(pageId === 'page-production-calc') populateProductionCalcDropdown(); 
+            if(pageId === 'page-production-job') populateProductionJobDropdown();
+            if(pageId === 'page-production-history') renderProductionList();
+            if(pageId === 'page-branch') populateForecastForRequest();
+            if(pageId === 'page-rq-history') renderRequestList();
+            if(pageId === 'page-warehouse') populateRequestForIssue();
+            if(pageId === 'page-report') renderReport();
+        }
+
+        // --- 2.2 Module: Master Data Management ---
+        function renderMasterData() {
+            renderMasterBranch();
+            renderMasterProduct();
+        }
+
+        function renderMasterBranch() {
+            const tbody = document.getElementById('master-branch-body');
+            tbody.innerHTML = '';
+            db.branches.forEach((b, index) => {
+                tbody.innerHTML += `
+                    <tr>
+                        <td style="color:var(--secondary);">${index + 1}</td>
+                        <td style="font-weight:bold; color:var(--primary);">${b.code}</td>
+                        <td style="font-weight:bold;">${b.name}</td>
+                        <td><span style="font-size: 0.75rem; background: #e2e8f0; color: #475569; padding: 0.25rem 0.5rem; border-radius: 999px;">${b.type || '-'}</span></td>
+                        <td style="text-align:center;">
+                            <div style="display: flex; gap: 0.25rem; justify-content: center;">
+                                <button onclick="editMasterBranch('${b.code}')" class="btn btn-secondary btn-sm" style="background:transparent; border:1px solid #cbd5e1; padding: 0.2rem 0.5rem;" title="แก้ไข">✏️</button>
+                                <button onclick="deleteMasterBranch('${b.code}')" class="btn btn-danger btn-sm" style="background:transparent; color:var(--danger); border:1px solid var(--danger); padding: 0.2rem 0.5rem;" title="ลบ">🗑️</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+
+        function renderMasterProduct() {
+            const tbody = document.getElementById('master-product-body');
+            tbody.innerHTML = '';
+            db.products.forEach(p => {
+                tbody.innerHTML += `
+                    <tr>
+                        <td><span style="font-size: 0.75rem; font-weight: bold; background:#f1f5f9; padding:2px 4px; border-radius:4px; border: 1px solid var(--border-color); white-space: nowrap;">${p.sku}</span></td>
+                        <td style="font-weight:bold; line-height: 1.4;">${p.name}</td>
+                        <td style="color:var(--secondary); font-size:0.85rem;">${p.category || '-'}</td>
+                        <td><span style="font-size: 0.75rem; background: #fef3c7; color: #d97706; padding: 0.25rem 0.5rem; border-radius: 999px;">${p.unit || 'ชิ้น'}</span></td>
+                        <td style="text-align:center;">
+                            <div style="display: flex; gap: 0.25rem; justify-content: center;">
+                                <button onclick="editMasterProduct('${p.sku}')" class="btn btn-secondary btn-sm" style="background:transparent; border:1px solid #cbd5e1; padding: 0.2rem 0.5rem;" title="แก้ไข">✏️</button>
+                                <button onclick="deleteMasterProduct('${p.sku}')" class="btn btn-danger btn-sm" style="background:transparent; color:var(--danger); border:1px solid var(--danger); padding: 0.2rem 0.5rem;" title="ลบ">🗑️</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+
+        function openBranchModal() {
+            const formHtml = `
+                <div class="form-group" style="margin-bottom: 1.25rem;">
+                    <label>รหัสสาขา (Branch Code) <span style="color:var(--danger);">*</span></label>
+                    <input type="text" id="m-branch-code" placeholder="เช่น BKK-02" style="width:100%; border-radius:8px;">
+                </div>
+                <div class="form-group" style="margin-bottom: 1.25rem;">
+                    <label>ชื่อสาขา (Branch Name) <span style="color:var(--danger);">*</span></label>
+                    <input type="text" id="m-branch-name" placeholder="เช่น สาขาลาดพร้าว" style="width:100%; border-radius:8px;">
+                </div>
+                <div class="form-group" style="margin-bottom: 0.5rem;">
+                    <label>ประเภทสาขา (Type)</label>
+                    <select id="m-branch-type" style="width:100%; border-radius:8px;">
+                        <option value="สาขาหลัก">สาขาหลัก</option>
+                        <option value="แฟรนไชส์">แฟรนไชส์</option>
+                        <option value="Pop-up Store">Pop-up Store</option>
+                    </select>
+                </div>
+            `;
+            
+            showModal('🏠 เพิ่มข้อมูลสาขาใหม่', formHtml, () => {
+                const code = document.getElementById('m-branch-code').value.trim();
+                const name = document.getElementById('m-branch-name').value.trim();
+                const type = document.getElementById('m-branch-type').value;
+
+                if (!code || !name) { alert("กรุณากรอกรหัสสาขาและชื่อสาขาให้ครบถ้วน"); return; }
+                if (db.branches.find(b => b.code === code)) { alert("⚠️ มีรหัสสาขานี้ในระบบอยู่แล้ว!"); return; }
+
+                db.branches.push({ code, name, type });
+                saveToDb();
+                renderMasterBranch();
+                refreshAllDropdowns();
+                if(document.getElementById('page-marketing-matrix').classList.contains('active')) {
+                    renderMarketingMatrix(true); 
+                }
+                closeModal();
+            });
+        }
+
+        function deleteMasterBranch(branchCode) {
+            if(confirm(`ยืนยันการลบสาขา: ${branchCode} ?\n(การลบอาจส่งผลให้ดู Report ย้อนหลังของสาขานี้ไม่ได้)`)) {
+                db.branches = db.branches.filter(b => b.code !== branchCode);
+                saveToDb();
+                renderMasterBranch();
+                refreshAllDropdowns();
+                if(document.getElementById('page-marketing-matrix').classList.contains('active')) {
+                    renderMarketingMatrix(true); 
+                }
+            }
+        }
+
+        function editMasterBranch(code) {
+            const branch = db.branches.find(b => b.code === code);
+            if (!branch) return;
+
+            const formHtml = `
+                <div class="form-group" style="margin-bottom: 1.25rem;">
+                    <label>รหัสสาขา (Branch Code) <span style="color:var(--danger);">*</span></label>
+                    <input type="text" id="m-branch-code" value="${branch.code}" disabled style="width:100%; border-radius:8px; background: #f1f5f9; color: var(--secondary);">
+                </div>
+                <div class="form-group" style="margin-bottom: 1.25rem;">
+                    <label>ชื่อสาขา (Branch Name) <span style="color:var(--danger);">*</span></label>
+                    <input type="text" id="m-branch-name" value="${branch.name}" style="width:100%; border-radius:8px;">
+                </div>
+                <div class="form-group" style="margin-bottom: 0.5rem;">
+                    <label>ประเภทสาขา (Type)</label>
+                    <select id="m-branch-type" style="width:100%; border-radius:8px;">
+                        <option value="สาขาหลัก" ${branch.type === 'สาขาหลัก' ? 'selected' : ''}>สาขาหลัก</option>
+                        <option value="แฟรนไชส์" ${branch.type === 'แฟรนไชส์' ? 'selected' : ''}>แฟรนไชส์</option>
+                        <option value="Pop-up Store" ${branch.type === 'Pop-up Store' ? 'selected' : ''}>Pop-up Store</option>
+                    </select>
+                </div>
+            `;
+            
+            showModal('✏️ แก้ไขข้อมูลสาขา', formHtml, () => {
+                const name = document.getElementById('m-branch-name').value.trim();
+                const type = document.getElementById('m-branch-type').value;
+
+                if (!name) { alert("กรุณากรอกชื่อสาขาให้ครบถ้วน"); return; }
+
+                branch.name = name;
+                branch.type = type;
+
+                saveToDb();
+                renderMasterBranch();
+                refreshAllDropdowns();
+                if(document.getElementById('page-marketing-matrix').classList.contains('active')) {
+                    renderMarketingMatrix(true); 
+                }
+                closeModal();
+            });
+        }
+
+        function deleteAllMasterBranches() {
+            if(confirm('⚠️ คุณแน่ใจหรือไม่ว่าต้องการ "ลบสาขาทั้งหมด" ?\n(การกระทำนี้ไม่สามารถกู้คืนได้)')) {
+                db.branches = [];
+                saveToDb();
+                renderMasterBranch();
+                refreshAllDropdowns();
+                if(document.getElementById('page-marketing-matrix').classList.contains('active')) {
+                    renderMarketingMatrix(true); 
+                }
+            }
+        }
+
+        function openProductModal() {
+            const formHtml = `
+                <div class="form-group" style="margin-bottom: 1.25rem;">
+                    <label>รหัส SKU <span style="color:var(--danger);">*</span></label>
+                    <input type="text" id="m-prod-sku" placeholder="เช่น FG-K011" style="width:100%; border-radius:8px;">
+                </div>
+                <div class="form-group" style="margin-bottom: 1.25rem;">
+                    <label>ชื่อสินค้า <span style="color:var(--danger);">*</span></label>
+                    <input type="text" id="m-prod-name" placeholder="ระบุชื่อสินค้า" style="width:100%; border-radius:8px;">
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                    <div class="form-group">
+                        <label>หมวดหมู่ (Category)</label>
+                        <select id="m-prod-cat" style="width:100%; border-radius:8px;">
+                            <option value="เครื่องดื่ม">เครื่องดื่ม</option>
+                            <option value="อาหาร">อาหาร</option>
+                            <option value="เบเกอรี่">เบเกอรี่</option>
+                            <option value="วัตถุดิบ">วัตถุดิบ</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>หน่วยนับ (Unit)</label>
+                        <input type="text" id="m-prod-unit" value="ชิ้น" placeholder="เช่น ชิ้น, แพ็ค" style="width:100%; border-radius:8px;">
+                    </div>
+                </div>
+            `;
+            
+            showModal('📦 เพิ่มข้อมูลสินค้าใหม่', formHtml, () => {
+                const sku = document.getElementById('m-prod-sku').value.trim();
+                const name = document.getElementById('m-prod-name').value.trim();
+                const cat = document.getElementById('m-prod-cat').value;
+                const unit = document.getElementById('m-prod-unit').value.trim() || 'ชิ้น';
+
+                if (!sku || !name) { alert("กรุณากรอก SKU และชื่อสินค้าให้ครบถ้วน"); return; }
+                if (db.products.find(p => p.sku === sku)) { alert("⚠️ มีรหัส SKU นี้ในระบบอยู่แล้ว!"); return; }
+
+                db.products.push({ sku, name, category: cat, unit });
+                saveToDb();
+                renderMasterProduct();
+                if(document.getElementById('page-marketing-matrix').classList.contains('active')) {
+                    renderMarketingMatrix(true);
+                }
+                
+                setTimeout(() => {
+                    const matrixContainer = document.querySelector('.matrix-container');
+                    if(matrixContainer) matrixContainer.scrollTop = matrixContainer.scrollHeight;
+                }, 100);
+                closeModal();
+            });
+        }
+
+        // --- NEW: Import Master Products ---
+        function processMasterProductImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'});
+                    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                    
+                    let importCount = 0;
+                    let skipCount = 0;
+                    
+                    jsonData.forEach(row => {
+                        const keys = Object.keys(row);
+                        const skuKey = keys.find(k => /sku|รหัส/i.test(k));
+                        const nameKey = keys.find(k => /name|ชื่อ/i.test(k));
+                        const catKey = keys.find(k => /category|หมวด/i.test(k));
+                        const unitKey = keys.find(k => /unit|หน่วย/i.test(k));
+                        
+                        if (skuKey && nameKey) {
+                            const sku = String(row[skuKey]).trim();
+                            const name = String(row[nameKey]).trim();
+                            const cat = catKey && row[catKey] ? String(row[catKey]).trim() : '-';
+                            const unit = unitKey && row[unitKey] ? String(row[unitKey]).trim() : 'ชิ้น';
+                            
+                            // เช็คว่าต้องมี SKU, ชื่อ และ ต้องไม่ซ้ำกับของเดิม
+                            if (sku && name && !db.products.find(p => p.sku === sku)) {
+                                db.products.push({ sku, name, category: cat, unit });
+                                importCount++;
+                            } else {
+                                skipCount++; // ข้ามถ้ารหัสซ้ำ หรือข้อมูลไม่ครบ
+                            }
+                        }
+                    });
+                    
+                    if (importCount > 0) {
+                        saveToDb();
+                        alert(`✅ นำเข้าข้อมูลสินค้าสำเร็จ: ${importCount} รายการ\n⚠️ ข้าม (ข้อมูลซ้ำ/ไม่ครบ): ${skipCount} รายการ`);
+                        renderMasterProduct();
+                        if(document.getElementById('page-marketing-matrix').classList.contains('active')) {
+                            renderMarketingMatrix(true);
+                        }
+                    } else {
+                        alert('⚠️ ไม่พบข้อมูลสินค้าใหม่ที่สามารถนำเข้าได้\n(ตรวจสอบว่าไฟล์มีคอลัมน์ SKU และ ชื่อสินค้า หรือสินค้านั้นมีอยู่แล้ว)');
+                    }
+                } catch(err) {
+                    console.error(err);
+                    alert('เกิดข้อผิดพลาดในการอ่านไฟล์ Excel');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+            event.target.value = ''; 
+        }
+
+        function deleteAllMasterProducts() {
+            if(confirm('⚠️ คุณแน่ใจหรือไม่ว่าต้องการ "ลบสินค้าทั้งหมด" ?\n(การกระทำนี้ไม่สามารถกู้คืนได้)')) {
+                db.products = [];
+                saveToDb();
+                renderMasterProduct();
+                if(document.getElementById('page-marketing-matrix').classList.contains('active')) {
+                    renderMarketingMatrix(true); 
+                }
+            }
+        }
+
+        // ยังคงรองรับการเรียกใช้ฟังก์ชันเดิมเพื่อ Backward Compatibility
+        function addMatrixBranch() { openBranchModal(); }
+        function addMatrixProduct() { openProductModal(); }
+        function addMasterProduct() { openProductModal(); }
+
+        function deleteMasterProduct(sku) {
+            if(confirm(`ยืนยันการลบสินค้า SKU: ${sku} ?`)) {
+                db.products = db.products.filter(p => p.sku !== sku);
+                saveToDb();
+                renderMasterProduct();
+                if(document.getElementById('page-marketing-matrix').classList.contains('active')) {
+                    renderMarketingMatrix(true);
+                }
+            }
+        }
+
+        function editMasterProduct(sku) {
+            const prod = db.products.find(p => p.sku === sku);
+            if (!prod) return;
+
+            const formHtml = `
+                <div class="form-group" style="margin-bottom: 1.25rem;">
+                    <label>รหัส SKU <span style="color:var(--danger);">*</span></label>
+                    <input type="text" id="m-prod-sku" value="${prod.sku}" disabled style="width:100%; border-radius:8px; background: #f1f5f9; color: var(--secondary);">
+                </div>
+                <div class="form-group" style="margin-bottom: 1.25rem;">
+                    <label>ชื่อสินค้า <span style="color:var(--danger);">*</span></label>
+                    <input type="text" id="m-prod-name" value="${prod.name}" style="width:100%; border-radius:8px;">
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                    <div class="form-group">
+                        <label>หมวดหมู่ (Category)</label>
+                        <select id="m-prod-cat" style="width:100%; border-radius:8px;">
+                            <option value="เครื่องดื่ม" ${prod.category === 'เครื่องดื่ม' ? 'selected' : ''}>เครื่องดื่ม</option>
+                            <option value="อาหาร" ${prod.category === 'อาหาร' ? 'selected' : ''}>อาหาร</option>
+                            <option value="เบเกอรี่" ${prod.category === 'เบเกอรี่' ? 'selected' : ''}>เบเกอรี่</option>
+                            <option value="วัตถุดิบ" ${prod.category === 'วัตถุดิบ' ? 'selected' : ''}>วัตถุดิบ</option>
+                            <option value="-" ${prod.category === '-' ? 'selected' : ''}>-</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>หน่วยนับ (Unit)</label>
+                        <input type="text" id="m-prod-unit" value="${prod.unit}" style="width:100%; border-radius:8px;">
+                    </div>
+                </div>
+            `;
+            
+            showModal('✏️ แก้ไขข้อมูลสินค้า', formHtml, () => {
+                const name = document.getElementById('m-prod-name').value.trim();
+                const cat = document.getElementById('m-prod-cat').value;
+                const unit = document.getElementById('m-prod-unit').value.trim() || 'ชิ้น';
+
+                if (!name) { alert("กรุณากรอกชื่อสินค้าให้ครบถ้วน"); return; }
+
+                prod.name = name;
+                prod.category = cat;
+                prod.unit = unit;
+
+                saveToDb();
+                renderMasterProduct();
+                if(document.getElementById('page-marketing-matrix').classList.contains('active')) {
+                    renderMarketingMatrix(true);
+                }
+                closeModal();
+            });
+        }
+
+        // --- 2.5 Module: Marketing Matrix Forecast ---
+        let matrixInputState = {}; 
+
+        function saveMatrixState() {
+            matrixInputState = {};
+            const rows = document.querySelectorAll('#matrix-tbody tr');
+            rows.forEach(row => {
+                const sku = row.dataset.sku;
+                if(!sku) return;
+                matrixInputState[sku] = {};
+                row.querySelectorAll('.matrix-input').forEach(inp => {
+                    const branch = inp.dataset.branch;
+                    matrixInputState[sku][branch] = inp.value;
+                });
+            });
+        }
+
+        function renderMarketingMatrix(preserveState = false) {
+            if(preserveState) {
+                saveMatrixState(); 
+            } else {
+                matrixInputState = {}; 
+            }
+
+            const thead = document.getElementById('matrix-thead-tr');
+            const tbody = document.getElementById('matrix-tbody');
+            if(!thead || !tbody) return;
+            
+            // 1. Render Headers
+            let thHtml = `<th>SKU</th><th>Product Name</th>`;
+            db.branches.forEach(b => {
+                thHtml += `<th><div style="font-size: 0.75rem; text-align: center; color: var(--primary);">${b.code}<br><span style="font-weight:normal; color:var(--secondary); font-size:0.65rem;">${b.name}</span></div></th>`;
+            });
+            thHtml += `<th>Total Qty</th>`;
+            thead.innerHTML = thHtml;
+            
+            // 2. Render Body Rows
+            tbody.innerHTML = '';
+            db.products.forEach(prod => {
+                let tr = document.createElement('tr');
+                tr.dataset.sku = prod.sku;
+                
+                // Sticky Left Cells
+                let tdHtml = `
+                    <td><span style="font-size: 0.75rem; font-weight: bold; color: var(--secondary); background:#f1f5f9; padding:2px 4px; border-radius:4px; border: 1px solid var(--border-color); white-space: nowrap;">${prod.sku}</span></td>
+                    <td><div style="font-size: 0.85rem; font-weight: bold; color: var(--text-main); line-height: 1.4;">${prod.name}</div></td>
+                `;
+                
+                let rowTotal = 0;
+                // Branch Input Cells
+                db.branches.forEach(b => {
+                    let val = (matrixInputState[prod.sku] && matrixInputState[prod.sku][b.code]) ? matrixInputState[prod.sku][b.code] : '0';
+                    rowTotal += parseInt(val) || 0;
+                    let isZeroClass = (val === '0' || val === '') ? 'is-zero' : '';
+
+                    tdHtml += `
+                        <td style="text-align: center; padding: 0.25rem;">
+                            <input type="number" class="matrix-input ${isZeroClass}" data-branch="${b.code}" value="${val}" min="0" onfocus="this.select()" oninput="calcMatrixTotal(this)">
+                        </td>
+                    `;
+                });
+                
+                // Sticky Right Total Cell
+                tdHtml += `<td class="matrix-total-cell" style="font-size: 1.15rem;">${rowTotal}</td>`;
+                
+                tr.innerHTML = tdHtml;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function calcMatrixTotal(inputElement) {
+            if (inputElement.value === '0' || inputElement.value === '') {
+                inputElement.classList.add('is-zero');
+            } else {
+                inputElement.classList.remove('is-zero');
+            }
+
+            const row = inputElement.closest('tr');
+            const inputs = row.querySelectorAll('.matrix-input');
+            let total = 0;
+            inputs.forEach(inp => {
+                total += parseInt(inp.value) || 0;
+            });
+            
+            row.querySelector('.matrix-total-cell').innerText = total;
+        }
+
+        // --- NEW: Import Excel for Matrix ---
+        function processMatrixExcelImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'});
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                    
+                    let matchCount = 0;
+                    
+                    jsonData.forEach(row => {
+                        const keys = Object.keys(row);
+                        const skuKey = keys.find(k => /sku|code|รหัส/i.test(k));
+                        
+                        if (skuKey) {
+                            const sku = String(row[skuKey]).trim();
+                            
+                            db.branches.forEach(b => {
+                                const branchKey = keys.find(k => k.toUpperCase().includes(b.code.toUpperCase()));
+                                if (branchKey && row[branchKey] !== undefined) {
+                                    const qty = parseInt(row[branchKey]) || 0;
+                                    if (updateMatrixQty(sku, b.code, qty)) {
+                                        matchCount++;
+                                    }
+                                }
+                            });
+                        }
+                    });
+                    
+                    if(matchCount > 0) {
+                        alert(`✅ นำเข้าข้อมูลสำเร็จ: อัปเดตข้อมูล ${matchCount} รายการ\nกรุณาตรวจสอบความถูกต้องก่อนกด "บันทึกแผนประจำงวด"`);
+                    } else {
+                        alert('⚠️ ไม่พบข้อมูลที่ตรงกับตารางนี้\n(ตรวจสอบคอลัมน์ SKU และรหัสสาขาในไฟล์ Excel)');
+                    }
+                } catch(err) {
+                    console.error(err);
+                    alert('เกิดข้อผิดพลาดในการอ่านไฟล์ Excel');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+            event.target.value = ''; 
+        }
+        
+        function updateMatrixQty(sku, branchCode, newQty) {
+            let found = false;
+            const row = document.querySelector(`#matrix-tbody tr[data-sku="${sku}"]`);
+            if (row) {
+                const inputQty = row.querySelector(`.matrix-input[data-branch="${branchCode}"]`);
+                if (inputQty) {
+                    inputQty.value = newQty;
+                    calcMatrixTotal(inputQty); 
+                    
+                    inputQty.style.borderColor = 'var(--success)';
+                    inputQty.style.backgroundColor = 'var(--success-bg)';
+                    inputQty.style.color = 'var(--success)';
+                    setTimeout(() => {
+                         inputQty.style.cssText = ''; 
+                         calcMatrixTotal(inputQty); 
+                    }, 800);
+                    
+                    found = true;
+                }
+            }
+            return found;
+        }
+
+        function saveMatrixForecast() {
+            const periodInput = document.getElementById('matrix-period').value;
+            if (!periodInput) { 
+                alert('กรุณาระบุรอบการขาย (Period)'); 
+                return; 
+            }
+
+            let totalSaved = 0;
+
+            db.branches.forEach(branch => {
+                let branchTotalQty = 0;
+                let branchItemsToSave = [];
+
+                const rows = document.querySelectorAll('#matrix-tbody tr');
+                rows.forEach(row => {
+                    const sku = row.dataset.sku;
+                    const productName = db.products.find(p => p.sku === sku)?.name || sku;
+                    const input = row.querySelector(`.matrix-input[data-branch="${branch.code}"]`);
+                    
+                    if(input) {
+                        const qty = parseInt(input.value) || 0;
+                        if (qty > 0) {
+                            branchItemsToSave.push({
+                                sku: sku,
+                                product_name: productName,
+                                forecast_qty: qty
+                            });
+                            branchTotalQty += qty;
+                        }
+                    }
+                });
+
+                if (branchTotalQty > 0) {
+                    const fcId = generateId('FC-' + branch.code.replace('-', ''));
+                    
+                    db.forecasts.push({
+                        fc_id: fcId,
+                        branch_name: branch.code,
+                        forecast_period: periodInput,
+                        created_date: new Date().toISOString().split('T')[0],
+                        created_by: 'Marketing Team (Matrix)',
+                        status: 'Approved' 
+                    });
+
+                    branchItemsToSave.forEach(item => {
+                        db.items.push({
+                            item_id: Date.now() + Math.random(),
+                            fc_id: fcId,
+                            sku: item.sku,
+                            product_name: item.product_name,
+                            forecast_qty: item.forecast_qty,
+                            request_qty: 0,
+                            issued_qty: 0,
+                            diff_qty: 0,
+                            item_status: 'Pending'
+                        });
+                    });
+
+                    totalSaved++;
+                }
+            });
+
+            if (totalSaved > 0) {
+                saveToDb();
+                alert(`✅ บันทึกแผน Forecast เรียบร้อยแล้ว!\nระบบได้ทำการสร้างเอกสารรายสาขาอัตโนมัติจำนวน ${totalSaved} ใบ และพร้อมส่งต่อให้ฝ่ายผลิตคำนวณเป้าหมายแล้วครับ`);
+                renderMarketingMatrix(false); 
+            } else {
+                alert('⚠️ ไม่มียอด Forecast ให้บันทึก (กรุณาระบุจำนวนอย่างน้อย 1 รายการในตาราง)');
+            }
+        }
+
+        // --- 4. Module: Forecast (Planning Legacy) ---
+        function addForecastItemRow(sku='', name='', qty='') {
+            const tbody = document.getElementById('fc_items_body');
+            const tr = document.createElement('tr');
+            
+            let skuOptions = '<option value="">-- เลือก SKU --</option>';
+            db.products.forEach(p => {
+                skuOptions += `<option value="${p.sku}" ${sku === p.sku ? 'selected' : ''}>${p.sku}</option>`;
+            });
+
+            tr.innerHTML = `
+                <td>
+                    <select class="inp-sku" style="width:100%; padding:0.5rem; border-radius:4px; border:1px solid var(--border-color);" onchange="updateLegacyRowName(this)">
+                        ${skuOptions}
+                    </select>
+                </td>
+                <td><input type="text" class="inp-name" value="${name}" placeholder="ชื่อสินค้า (Auto)" readonly style="width:100%; background:#f8fafc; color:var(--secondary); font-weight:bold;"></td>
+                <td><input type="number" class="inp-qty" value="${qty}" min="1" placeholder="0" style="width:100%"></td>
+                <td><button class="btn btn-danger btn-sm" onclick="this.closest('tr').remove()">ลบ</button></td>
+            `;
+            tbody.appendChild(tr);
+            
+            if (sku) {
+               const selectEl = tr.querySelector('.inp-sku');
+               updateLegacyRowName(selectEl);
+            }
+        }
+        
+        function updateLegacyRowName(selectEl) {
+            const sku = selectEl.value;
+            const nameInput = selectEl.closest('tr').querySelector('.inp-name');
+            const prod = db.products.find(p => p.sku === sku);
+            nameInput.value = prod ? prod.name : '';
+        }
+
+        function resetForecastForm() {
+            document.getElementById('fc_id').value = '';
+            document.getElementById('fc_branch').value = '';
+            document.getElementById('fc_period_start').value = '';
+            document.getElementById('fc_period_end').value = '';
+            document.getElementById('fc_items_body').innerHTML = '';
+            document.getElementById('fc_branch').disabled = false;
+            document.getElementById('fc_period_start').disabled = false;
+            document.getElementById('fc_period_end').disabled = false;
+            addForecastItemRow(); 
+            
+            document.getElementById('btn-save-draft').style.display = 'inline-flex';
+            document.getElementById('btn-approve').style.display = 'inline-flex';
+        }
+
+        function saveForecast(status) {
+            let fcId = document.getElementById('fc_id').value;
+            const branch = document.getElementById('fc_branch').value;
+            const start = document.getElementById('fc_period_start').value;
+            const end = document.getElementById('fc_period_end').value;
+            const creator = document.getElementById('fc_creator').value;
+
+            if(!branch || !start || !end) { alert('กรุณาระบุสาขาและวันที่ช่วงเวลาให้ครบถ้วน'); return; }
+            const period = start.substring(0, 7); 
+
+            const rows = document.querySelectorAll('#fc_items_body tr');
+            if(rows.length === 0) { alert('กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ'); return; }
+
+            let isNew = false;
+            if(!fcId) {
+                fcId = generateId('FC');
+                isNew = true;
+                db.forecasts.push({ fc_id: fcId, branch_name: branch, forecast_period: period, created_date: new Date().toISOString().split('T')[0], created_by: creator, status: status });
+            } else {
+                const forecast = db.forecasts.find(h => h.fc_id === fcId);
+                if(forecast) { forecast.status = status; forecast.branch_name = branch; forecast.forecast_period = period; }
+            }
+
+            db.items = db.items.filter(item => item.fc_id !== fcId);
+            
+            rows.forEach(row => {
+                const sku = row.querySelector('.inp-sku').value;
+                const name = row.querySelector('.inp-name').value;
+                const qty = parseInt(row.querySelector('.inp-qty').value) || 0;
+                
+                if(sku && qty > 0) {
+                    db.items.push({
+                        item_id: Date.now() + Math.random(),
+                        fc_id: fcId,
+                        sku: sku, product_name: name, forecast_qty: qty,
+                        request_qty: 0, issued_qty: 0, diff_qty: 0, item_status: 'Pending'
+                    });
+                }
+            });
+
+            saveToDb();
+            alert(`บันทึก Forecast ${fcId} สถานะ: ${status} เรียบร้อยแล้ว`);
+            resetForecastForm();
+            renderForecastList();
+        }
+
+        function editForecast(id) {
+            const forecast = db.forecasts.find(h => h.fc_id === id);
+            const items = db.items.filter(i => i.fc_id === id);
+
+            document.getElementById('fc_id').value = forecast.fc_id;
+            document.getElementById('fc_branch').value = forecast.branch_name;
+            
+            document.getElementById('fc_period_start').value = forecast.forecast_period + '-01';
+            document.getElementById('fc_period_end').value = '';
+            
+            const tbody = document.getElementById('fc_items_body');
+            tbody.innerHTML = '';
+            items.forEach(i => addForecastItemRow(i.sku, i.product_name, i.forecast_qty));
+
+            const isLocked = forecast.status === 'Approved' || forecast.status === 'Closed';
+            document.getElementById('fc_branch').disabled = isLocked;
+            document.getElementById('fc_period_start').disabled = isLocked;
+            document.getElementById('fc_period_end').disabled = isLocked;
+            
+            document.querySelectorAll('#fc_items_body select').forEach(inp => inp.disabled = isLocked);
+            document.querySelectorAll('#fc_items_body input').forEach(inp => inp.disabled = isLocked);
+            document.querySelectorAll('#fc_items_body .btn-danger').forEach(btn => btn.style.display = isLocked ? 'none' : 'block');
+            
+            document.getElementById('btn-save-draft').style.display = isLocked ? 'none' : 'inline-flex';
+            document.getElementById('btn-approve').style.display = isLocked ? 'none' : 'inline-flex';
+            
+            switchPage('page-forecast', 'สร้างแผนสั่งผลิต (Forecast Document)');
+            
+            const dropToggle = document.querySelectorAll('.nav-dropdown-toggle')[0];
+            dropToggle.classList.add('open');
+            dropToggle.nextElementSibling.classList.add('open');
+            document.querySelectorAll('.sub-nav-btn')[2].classList.add('active'); 
+
+            window.scrollTo(0, 0);
+        }
+
+        function renderForecastList() {
+            const tbody = document.getElementById('fc_list_body');
+            tbody.innerHTML = '';
+            [...db.forecasts].reverse().forEach(h => {
+                tbody.innerHTML += `
+                    <tr>
+                        <td><strong>${h.fc_id}</strong></td>
+                        <td>${h.branch_name}</td>
+                        <td>${h.forecast_period}</td>
+                        <td>${getStatusBadge(h.status)}</td>
+                        <td><button class="btn btn-sm btn-primary" onclick="editForecast('${h.fc_id}')">ดู/แก้ไข</button></td>
+                    </tr>
+                `;
+            });
+        }
+
+        // --- 4.5. Module: Production Planning (CALC) ---
+        function populateProductionCalcDropdown() {
+            const select = document.getElementById('prod_period_select');
+            select.innerHTML = '<option value="">-- เลือกรอบการขาย (Period) เพื่อคำนวณ --</option>';
+            
+            const approvedPeriods = [...new Set(db.forecasts.filter(f => f.status === 'Approved').map(f => f.forecast_period))];
+
+            approvedPeriods.forEach(period => {
+                const hasProd = db.productions.find(p => p.ref_period === period);
+                if(!hasProd) {
+                    select.innerHTML += `<option value="${period}">${period}</option>`;
+                }
+            });
+        }
+
+        function loadProductionCalcItems() {
+            const period = document.getElementById('prod_period_select').value;
+            const container = document.getElementById('prod_calc_items_container');
+            if(!period) { container.style.display = 'none'; return; }
+
+            container.style.display = 'block';
+            
+            const relevantFcIds = db.forecasts
+                .filter(f => f.forecast_period === period && f.status === 'Approved')
+                .map(f => f.fc_id);
+
+            const aggregatedItems = {};
+            db.items.forEach(item => {
+                if(relevantFcIds.includes(item.fc_id)) {
+                    if(!aggregatedItems[item.sku]) {
+                        aggregatedItems[item.sku] = {
+                            sku: item.sku,
+                            product_name: item.product_name,
+                            total_qty: 0
+                        };
+                    }
+                    aggregatedItems[item.sku].total_qty += item.forecast_qty;
+                }
+            });
+
+            const tbody = document.getElementById('prod_calc_items_body');
+            tbody.innerHTML = '';
+            
+            // ตัวแปรสำหรับคำนวณผลรวมภาพใหญ่ด้านบน
+            let totalA = 0;
+            
+            Object.values(aggregatedItems).forEach(item => {
+                totalA += item.total_qty;
+                
+                tbody.innerHTML += `
+                    <tr data-sku="${item.sku}" data-name="${item.product_name}" style="border-bottom: 1px solid var(--border-color); transition: all 0.2s;">
+                        <td style="padding: 0.5rem 1rem;">
+                            <div style="font-weight: 600; color: var(--text-main); font-size: 0.95rem; margin-bottom: 0.15rem;">${item.product_name}</div>
+                            <span style="font-size: 0.7rem; font-weight: 600; background: #e2e8f0; color: var(--secondary); padding: 0.15rem 0.4rem; border-radius: 4px;">${item.sku}</span>
+                        </td>
+                        <td style="text-align: center; padding: 0.5rem 1rem;">
+                            <span class="prod-fc-qty" style="font-size: 1.15rem; font-weight: 700; color: var(--secondary);">${item.total_qty}</span>
+                        </td>
+                        <td style="padding: 0.5rem 1rem; text-align: center; background: #fef2f2;">
+                            <div style="display: flex; justify-content: center;">
+                                <input type="number" class="prod-stock-qty" value="0" min="0" oninput="calcProductionQty(this)" onfocus="this.select()" style="width: 100%; max-width: 90px; text-align: center; padding: 0.4rem; border-radius: 6px; border: 1px solid #fca5a5; font-weight: 600; color: #000; outline:none; transition:0.2s; background: #fff;" onfocus="this.style.borderColor='var(--danger)'; this.style.boxShadow='0 0 0 3px rgba(239,68,68,0.1)'" onblur="this.style.borderColor='#fca5a5'; this.style.boxShadow='none'">
+                            </div>
+                        </td>
+                        <td style="padding: 0.5rem 1rem; text-align: center; background: #fffbeb;">
+                            <div style="display: flex; gap: 0.4rem; align-items: center; justify-content: center;">
+                                <input type="number" class="prod-buffer-input" value="0" min="0" step="any" oninput="calcProductionQty(this)" onfocus="this.select()" style="width: 60px; text-align: center; padding: 0.4rem; border-radius: 4px; border: 1px solid #fcd34d; font-weight: 600; color: #000; outline:none; transition:0.2s;" onfocus="this.style.borderColor='#d97706'" onblur="this.style.borderColor='#fcd34d'">
+                                <select class="prod-buffer-type" onchange="calcProductionQty(this)" style="padding: 0.4rem; border-radius: 4px; border: 1px solid #fcd34d; background: #fff; color: var(--text-main); outline:none; font-weight:600; cursor:pointer;">
+                                    <option value="qty">ชิ้น</option>
+                                    <option value="percent">%</option>
+                                </select>
+                            </div>
+                            <div class="buffer-qty-display" style="font-size: 0.7rem; color: #d97706; text-align: center; margin-top: 0.2rem; min-height: 14px; font-weight: 700;"></div>
+                            <input type="hidden" class="prod-buffer-qty" value="0">
+                        </td>
+                        <td style="text-align: center; padding: 0.5rem 1rem; background: var(--primary-light);">
+                            <span id="prod-result-${item.sku}" class="prod-result-val" style="font-size: 1.35rem; font-weight: 800; color: var(--primary);">${item.total_qty}</span>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            // อัปเดต Summary Cards
+            document.getElementById('calc-total-fc').innerText = totalA.toLocaleString();
+            document.getElementById('calc-total-target').innerText = totalA.toLocaleString(); // เริ่มต้น Target = Forecast
+        }
+
+        function calcProductionQty(inputElement) {
+            const row = inputElement.closest('tr');
+            const fcQty = parseInt(row.querySelector('.prod-fc-qty').innerText) || 0; 
+            const stockQty = parseInt(row.querySelector('.prod-stock-qty').value) || 0; 
+            
+            const bufferInput = parseFloat(row.querySelector('.prod-buffer-input').value) || 0;
+            const bufferType = row.querySelector('.prod-buffer-type').value;
+            
+            let bufferQty = 0;
+            const displayDiv = row.querySelector('.buffer-qty-display');
+
+            if (bufferType === 'percent') {
+                bufferQty = Math.ceil(fcQty * (bufferInput / 100)); // ปัดเศษขึ้นเสมอเพื่อให้ของพอ
+                if (bufferInput > 0) {
+                    displayDiv.innerText = `≈ ${bufferQty} ชิ้น`;
+                } else {
+                    displayDiv.innerText = '';
+                }
+            } else {
+                bufferQty = Math.floor(bufferInput); // กรณีเป็นชิ้นก็ดึงเลขมาเลย
+                displayDiv.innerText = ''; 
+            }
+
+            // บันทึกค่าที่แท้จริงไว้ใน hidden input
+            row.querySelector('.prod-buffer-qty').value = bufferQty;
+            
+            let prodTarget = (fcQty - stockQty) + bufferQty;
+            if(prodTarget < 0) prodTarget = 0;
+            
+            const sku = row.getAttribute('data-sku');
+            const resultSpan = row.querySelector(`#prod-result-${sku}`);
+            resultSpan.innerText = prodTarget;
+            
+            if(prodTarget > 0) resultSpan.style.color = 'var(--primary)';
+            else resultSpan.style.color = 'var(--success)';
+            
+            // อัปเดต Summary Cards หลังจากมีการแก้ตัวเลข
+            updateProductionSummaryCards();
+        }
+        
+        function updateProductionSummaryCards() {
+            let totalA = 0;
+            let totalB = 0;
+            let totalC = 0;
+            let totalTarget = 0;
+            
+            const rows = document.querySelectorAll('#prod_calc_items_body tr');
+            rows.forEach(row => {
+                totalA += parseInt(row.querySelector('.prod-fc-qty').innerText) || 0;
+                totalB += parseInt(row.querySelector('.prod-stock-qty').value) || 0;
+                totalC += parseInt(row.querySelector('.prod-buffer-qty').value) || 0;
+                totalTarget += parseInt(row.querySelector('.prod-result-val').innerText) || 0;
+            });
+            
+            document.getElementById('calc-total-fc').innerText = totalA.toLocaleString();
+            document.getElementById('calc-total-stock').innerText = totalB.toLocaleString();
+            document.getElementById('calc-total-buffer').innerText = totalC.toLocaleString();
+            document.getElementById('calc-total-target').innerText = totalTarget.toLocaleString();
+        }
+
+        function saveProductionPlan() {
+            const period = document.getElementById('prod_period_select').value;
+            if(!period) {
+                alert("⚠️ กรุณาเลือกรอบการขาย (Period) ที่ต้องการคำนวณก่อนบันทึกแผนครับ");
+                return;
+            }
+
+            const prodId = generateId('PR'); 
+
+            const newProd = {
+                prod_id: prodId,
+                ref_period: period,
+                prod_date: new Date().toISOString().split('T')[0],
+                status: 'Planned',
+                items: [] 
+            };
+
+            const rows = document.querySelectorAll('#prod_calc_items_body tr');
+            let totalTarget = 0;
+
+            rows.forEach(row => {
+                const sku = row.getAttribute('data-sku');
+                const name = row.getAttribute('data-name');
+                const resultSpan = row.querySelector(`#prod-result-${sku}`);
+                const prodTarget = parseInt(resultSpan.innerText) || 0;
+                
+                totalTarget += prodTarget;
+
+                newProd.items.push({
+                    sku: sku,
+                    product_name: name,
+                    target_qty: prodTarget,
+                    produced_qty: 0
+                });
+            });
+
+            // เพิ่มการแจ้งเตือนหากคำนวณแล้วเป้าผลิตเป็น 0 ทุกรายการ
+            if(totalTarget <= 0) {
+                if(!confirm("⚠️ เป้าหมายการผลิตสุทธิรวมเป็น 0 ชิ้น (อาจเพราะสต็อกมีเพียงพอแล้ว)\nคุณยืนยันที่จะบันทึกแผนผลิตนี้ใช่หรือไม่?")) {
+                    return;
+                }
+            }
+
+            db.productions.push(newProd);
+            saveToDb();
+
+            alert(`✅ บันทึกเป้าหมายแผนสั่งผลิต: ${prodId} สำหรับรอบ ${period} เรียบร้อยแล้ว`);
+            document.getElementById('prod_period_select').value = '';
+            document.getElementById('prod_calc_items_container').style.display = 'none';
+            
+            switchPage('page-production-job', 'บันทึกการผลิตจริง (Actual Production)');
+            
+            const dropToggle = document.querySelectorAll('.nav-dropdown-toggle')[1];
+            dropToggle.classList.add('open');
+            dropToggle.nextElementSibling.classList.add('open');
+            document.querySelectorAll('.sub-nav-btn')[5].classList.add('active'); 
+        }
+
+        // --- 4.6. Module: Production Job (บันทึกผลิตจริง / ทยอยผลิต) ---
+        function populateProductionJobDropdown() {
+            const select = document.getElementById('prod_job_select');
+            select.innerHTML = '<option value="">-- เลือกแผนผลิตที่กำลังดำเนินการ --</option>';
+            db.productions.forEach(p => {
+                if(p.status === 'Planned') {
+                    select.innerHTML += `<option value="${p.prod_id}">${p.prod_id} (รอบ: ${p.ref_period})</option>`;
+                }
+            });
+        }
+
+        function loadProductionJobItems() {
+            const prId = document.getElementById('prod_job_select').value;
+            const container = document.getElementById('prod_job_items_container');
+            if(!prId) { container.style.display = 'none'; return; }
+
+            const prod = db.productions.find(p => p.prod_id === prId);
+            if(!prod) return;
+
+            container.style.display = 'block';
+            
+            const tbody = document.getElementById('prod_job_items_body');
+            tbody.innerHTML = '';
+            
+            prod.items.forEach((item, idx) => {
+                if(item.target_qty === 0) return;
+
+                const remaining = item.target_qty - (item.produced_qty || 0);
+                const isDone = remaining <= 0;
+
+                tbody.innerHTML += `
+                    <tr data-itemidx="${idx}" style="${isDone ? 'opacity: 0.6; background: #f8fafc;' : ''}">
+                        <td>
+                            <div style="font-weight: bold; color: var(--text-main);">${item.product_name} ${isDone ? '<span style="color:var(--success); font-size:0.7rem;">(ครบแล้ว)</span>' : ''}</div>
+                            <span style="font-size: 0.65rem; font-weight: bold; background: #f1f5f9; color: #64748b; padding: 0.2rem 0.5rem; border-radius: 4px; border: 1px solid var(--border-color);">${item.sku}</span>
+                        </td>
+                        <td style="text-align: center; font-weight: bold; font-size: 1.1rem; color: var(--secondary);">
+                            ${item.target_qty}
+                        </td>
+                        <td style="text-align: center; font-weight: bold; font-size: 1.1rem; color: var(--success);">
+                            ${item.produced_qty || 0}
+                        </td>
+                        <td style="text-align: center; font-weight: bold; font-size: 1.1rem; color: ${isDone ? 'var(--success)' : 'var(--danger)'};">
+                            ${remaining < 0 ? 0 : remaining}
+                        </td>
+                        <td>
+                            <div style="display: flex; gap: 0.5rem; align-items: center; justify-content: center;">
+                                <input type="number" class="prod-add-qty" value="${isDone ? 0 : remaining}" min="0" ${isDone ? 'disabled' : ''} onfocus="this.select()" style="width: 80px; text-align: center; padding: 0.6rem; border-radius: 8px; border: 2px solid var(--border-color); font-weight: bold; color: var(--primary); background: white; outline:none; transition:0.2s;" onfocus="this.style.borderColor='var(--primary)';" onblur="this.style.borderColor='var(--border-color)';">
+                                <button class="btn btn-primary btn-sm" onclick="saveSingleProductionJob('${prId}', ${idx})" ${isDone ? 'disabled style="opacity:0.5;cursor:not-allowed;border-radius:8px;"' : 'style="border-radius:8px; padding: 0.6rem 1rem;"'}>บันทึก</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            if(tbody.innerHTML === '') {
+                tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 2rem; color: var(--secondary);">แผนนี้ไม่มียอดที่ต้องผลิตเพิ่ม</td></tr>`;
+            }
+        }
+
+        function saveSingleProductionJob(prId, itemIdx) {
+            const prod = db.productions.find(p => p.prod_id === prId);
+            if(!prod) return;
+
+            const row = document.querySelector(`#prod_job_items_body tr[data-itemidx="${itemIdx}"]`);
+            if(!row) return;
+
+            const addInput = row.querySelector('.prod-add-qty');
+            if(!addInput || addInput.disabled) return;
+
+            const addQty = parseInt(addInput.value) || 0;
+            if(addQty <= 0) {
+                alert("กรุณากรอกจำนวนที่ผลิตเสร็จให้มากกว่า 0");
+                return;
+            }
+            
+            const item = prod.items[itemIdx];
+            item.produced_qty = (item.produced_qty || 0) + addQty;
+
+            const actuallyCompleted = prod.items.every(i => i.target_qty === 0 || (i.produced_qty || 0) >= i.target_qty);
+
+            if(actuallyCompleted) {
+                prod.status = 'Completed';
+                saveToDb();
+                alert(`บันทึกยอดผลิต ${addQty} ชิ้น สำหรับ ${item.product_name} เรียบร้อยแล้ว\n\n🎉 แผนสั่งผลิต ${prId} ผลิตครบตามเป้าหมายแล้ว (สถานะเปลี่ยนเป็น Completed)`);
+                document.getElementById('prod_job_select').value = '';
+                document.getElementById('prod_job_items_container').style.display = 'none';
+                populateProductionJobDropdown(); 
+                renderProductionList(); 
+            } else {
+                saveToDb();
+                alert(`บันทึกยอดผลิต ${addQty} ชิ้น สำหรับ ${item.product_name} เรียบร้อยแล้ว`);
+                loadProductionJobItems(); 
+                renderProductionList(); 
+            }
+        }
+
+        function renderProductionList() {
+            const tbody = document.getElementById('prod_list_body');
+            tbody.innerHTML = '';
+            
+            [...db.productions].reverse().forEach(p => {
+                let totalTarget = 0;
+                let totalProduced = 0;
+                
+                p.items.forEach(i => {
+                    totalTarget += i.target_qty;
+                    totalProduced += (i.produced_qty || 0);
+                });
+
+                let progressText = '-';
+                if(totalTarget > 0) {
+                    const percent = Math.min(100, Math.round((totalProduced / totalTarget) * 100));
+                    progressText = `<div style="display:flex; align-items:center; gap:0.5rem;">
+                                        <div style="width: 60px; height: 8px; background: #e2e8f0; border-radius: 4px; overflow:hidden;">
+                                            <div style="width: ${percent}%; height: 100%; background: ${percent === 100 ? 'var(--success)' : 'var(--primary)'};"></div>
+                                        </div>
+                                        <span style="font-size:0.75rem; font-weight:bold; color:var(--secondary);">${totalProduced}/${totalTarget}</span>
+                                    </div>`;
+                }
+
+                tbody.innerHTML += `
+                    <tr>
+                        <td><strong>${p.prod_id}</strong></td>
+                        <td>รอบ: ${p.ref_period}</td>
+                        <td>${p.prod_date}</td>
+                        <td>${progressText}</td>
+                        <td>${getStatusBadge(p.status)}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        // --- 5. Module: Branch Request ---
+        
+        function processBranchRequestImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const fileName = file.name.toLowerCase();
+            if (fileName.endsWith('.pdf')) {
+                processPDFImport(file);
+            } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+                processExcelImport(file);
+            } else {
+                alert('รองรับเฉพาะไฟล์ .xlsx, .xls หรือ .pdf เท่านั้น');
+            }
+            
+            event.target.value = '';
+        }
+
+        function processExcelImport(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'});
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                    
+                    let matchCount = 0;
+                    jsonData.forEach(row => {
+                        const keys = Object.keys(row);
+                        const skuKey = keys.find(k => /sku|code|รหัส/i.test(k));
+                        const qtyKey = keys.find(k => /qty|amount|count|จำนวน/i.test(k));
+                        
+                        if (skuKey && qtyKey) {
+                            const sku = String(row[skuKey]).trim();
+                            const qty = parseInt(row[qtyKey]) || 0;
+                            if (updateBranchRequestQty(sku, qty)) matchCount++;
+                        }
+                    });
+                    
+                    if(matchCount > 0) {
+                        alert(`✅ นำเข้าข้อมูลสำเร็จ: จับคู่สินค้าได้ ${matchCount} รายการ (รวมรายการนอกแผน)`);
+                    } else {
+                        alert('⚠️ ไม่พบข้อมูลรหัสสินค้าในระบบ หรือไฟล์ไม่ถูกต้อง\n(กรุณาตรวจสอบว่ามีคอลัมน์ SKU/จำนวน)');
+                    }
+                } catch(err) {
+                    console.error(err);
+                    alert('เกิดข้อผิดพลาดในการอ่านไฟล์ Excel');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        async function processPDFImport(file) {
+            if (typeof pdfjsLib === 'undefined') {
+                alert('ระบบยังโหลดไลบรารีอ่าน PDF ไม่เสร็จ โปรดรอสักครู่แล้วลองใหม่');
+                return;
+            }
+            
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+                let matchCount = 0;
+
+                for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                    const page = await pdf.getPage(pageNum);
+                    const textContent = await page.getTextContent();
+                    const items = textContent.items.map(item => ({ text: item.str, x: item.transform[4], y: item.transform[5] }));
+
+                    items.sort((a, b) => {
+                        const yDiff = Math.abs(a.y - b.y);
+                        if (yDiff < 5) return a.x - b.x;
+                        return b.y - a.y;
+                    });
+
+                    let lines = [];
+                    let currentLine = [];
+                    let lastY = -999;
+                    items.forEach(item => {
+                        if (lastY === -999 || Math.abs(item.y - lastY) < 5) {
+                            currentLine.push(item);
+                            lastY = item.y;
+                        } else {
+                            lines.push(currentLine);
+                            currentLine = [item];
+                            lastY = item.y;
+                        }
+                    });
+                    if (currentLine.length > 0) lines.push(currentLine);
+
+                    lines.forEach(line => {
+                        const parts = line.map(i => i.text.trim()).filter(t => t);
+                        if (parts.length >= 2) {
+                            let skuMatch = null;
+                            let qtyMatch = 0;
+                            
+                            for(let i=0; i<parts.length; i++) {
+                                const p = parts[i];
+                                const prodExists = db.products.find(prod => prod.sku === p);
+                                if (prodExists) {
+                                    skuMatch = p;
+                                    for(let j=parts.length-1; j>i; j--) {
+                                        const possibleQty = parseInt(parts[j].replace(/,/g, ''));
+                                        if(!isNaN(possibleQty)) {
+                                            qtyMatch = possibleQty;
+                                            break;
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                            
+                            if (skuMatch && qtyMatch > 0) {
+                                if(updateBranchRequestQty(skuMatch, qtyMatch)) matchCount++;
+                            }
+                        }
+                    });
+                }
+                
+                if(matchCount > 0) {
+                    alert(`✅ นำเข้าข้อมูลจาก PDF สำเร็จ: จัดการสินค้าได้ ${matchCount} รายการ`);
+                } else {
+                    alert('⚠️ ไม่พบข้อมูลที่ตรงกับรายการเบิกนี้ในไฟล์ PDF');
+                }
+            } catch (error) {
+                console.error(error);
+                alert('เกิดข้อผิดพลาดในการอ่านไฟล์ PDF');
+            }
+        }
+
+        function checkRequestQty(inputEl, fcQty) {
+            const val = parseInt(inputEl.value) || 0;
+            if (val > fcQty) {
+                inputEl.style.color = 'var(--warning)';
+                inputEl.style.borderColor = 'var(--warning)';
+                inputEl.style.backgroundColor = 'var(--warning-bg)';
+            } else {
+                inputEl.style.color = 'var(--primary)';
+                inputEl.style.borderColor = 'var(--border-color)';
+                inputEl.style.backgroundColor = '#fff';
+            }
+        }
+
+        function addUnplannedRequestItem(sku = '', qty = 0) {
+            const tbody = document.getElementById('br_items_body');
+            
+            let skuHtml = '';
+            let nameHtml = '';
+            
+            if (sku) {
+                const prod = db.products.find(p => p.sku === sku);
+                const name = prod ? prod.name : 'Unknown Product';
+                skuHtml = `<span style="font-size: 0.85rem; font-weight: 600; background: var(--danger-bg); color: var(--danger); padding: 0.35rem 0.5rem; border-radius: 6px; display: inline-block; white-space: nowrap;">${sku} <br><small>(นอกแผน)</small></span>`;
+                nameHtml = `<div style="font-weight: 600; color: var(--danger); font-size: 1rem; line-height: 1.4;">${name}</div>`;
+            } else {
+                let options = '<option value="">-- เลือกสินค้านอกแผน --</option>';
+                db.products.forEach(p => {
+                    options += `<option value="${p.sku}">${p.sku} - ${p.name}</option>`;
+                });
+                skuHtml = `<select class="br-new-sku-select" onchange="updateUnplannedRowName(this)" style="width:100%; padding:0.5rem; border-radius:6px; border:1px solid var(--danger); color: var(--danger); background: var(--danger-bg); font-weight: bold; outline: none;">${options}</select>`;
+                nameHtml = `<div class="br-new-name-display" style="font-weight: 600; color: var(--danger); font-size: 1rem; line-height: 1.4;">-</div>`;
+            }
+
+            const tr = document.createElement('tr');
+            tr.className = 'br-item-row';
+            tr.setAttribute('data-itemid', 'new');
+            if (sku) tr.setAttribute('data-sku', sku);
+            
+            tr.style.cssText = 'border-bottom: 1px solid var(--border-color); transition: all 0.2s; background: #fff5f5;'; 
+            
+            tr.innerHTML = `
+                <td style="padding: 1rem;">
+                    ${skuHtml}
+                </td>
+                <td style="padding: 1rem;">
+                    ${nameHtml}
+                </td>
+                <td style="text-align: center; padding: 1rem;">
+                    <span style="font-size: 1.25rem; font-weight: 700; color: var(--danger);">0</span>
+                </td>
+                <td style="padding: 1rem; text-align: center; background: var(--danger-bg);">
+                    <div style="display: flex; justify-content: center; align-items: center; gap: 0.5rem;">
+                        <input type="number" class="br-req-qty" value="${qty}" min="1" onfocus="this.select()" style="width: 100%; max-width: 100px; text-align: center; font-size: 1.1rem; font-weight: bold; color: var(--danger); padding: 0.6rem; border: 2px solid #fca5a5; border-radius: 8px; background: #fff; transition: all 0.2s; outline: none;">
+                        <button class="btn btn-danger btn-sm" onclick="this.closest('tr').remove()" style="padding: 0.4rem 0.6rem; border-radius: 8px;">ลบ</button>
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(tr);
+
+            // เพิ่มการเลื่อนหน้าจอ (Scroll) อัตโนมัติไปยังรายการที่เพิ่งเพิ่ม
+            setTimeout(() => {
+                tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                // โฟกัสไปที่ช่องเลือกสินค้าหรือช่องกรอกจำนวน เพื่อให้ผู้ใช้ทำงานต่อได้ทันที
+                const focusEl = tr.querySelector('.br-new-sku-select') || tr.querySelector('.br-req-qty');
+                if (focusEl) focusEl.focus();
+            }, 100);
+        }
+
+        function updateUnplannedRowName(selectEl) {
+            const sku = selectEl.value;
+            const nameDiv = selectEl.closest('tr').querySelector('.br-new-name-display');
+            const prod = db.products.find(p => p.sku === sku);
+            if (prod) {
+                nameDiv.innerText = prod.name;
+                selectEl.closest('tr').setAttribute('data-sku', sku);
+            } else {
+                nameDiv.innerText = '-';
+                selectEl.closest('tr').removeAttribute('data-sku');
+            }
+        }
+
+        function updateBranchRequestQty(sku, newQty) {
+            let found = false;
+            const rows = document.querySelectorAll('.br-item-row');
+            rows.forEach(row => {
+                let rowSku = row.getAttribute('data-sku');
+                if (!rowSku) {
+                    // Fallback for manual inputs that might not have data-sku set yet
+                    const spans = row.querySelectorAll('span');
+                    spans.forEach(span => {
+                        if(span.innerText.trim().includes(sku)) rowSku = sku;
+                    });
+                }
+
+                if (rowSku === sku) {
+                    const inputQty = row.querySelector('.br-req-qty');
+                    if (inputQty) {
+                        inputQty.value = newQty;
+                        
+                        // Check if it's over forecast and highlight
+                        const fcQtyText = row.querySelector('td:nth-child(3) span').innerText;
+                        const fcQty = parseInt(fcQtyText) || 0;
+                        
+                        if (newQty > fcQty && fcQty > 0) {
+                            inputQty.style.borderColor = 'var(--warning)';
+                            inputQty.style.backgroundColor = 'var(--warning-bg)';
+                            inputQty.style.color = 'var(--warning)';
+                        } else if (fcQty === 0) {
+                            // Let the Unplanned item logic keep it red
+                            inputQty.style.borderColor = 'var(--danger)';
+                            inputQty.style.color = 'var(--danger)';
+                        } else {
+                            inputQty.style.borderColor = 'var(--success)';
+                            inputQty.style.backgroundColor = 'var(--success-bg)';
+                            inputQty.style.color = 'var(--success)';
+                            setTimeout(() => {
+                                 inputQty.style.borderColor = 'var(--border-color)';
+                                 inputQty.style.backgroundColor = '#fff';
+                                 inputQty.style.color = 'var(--primary)';
+                            }, 800);
+                        }
+                        found = true;
+                    }
+                }
+            });
+            
+            if (!found) {
+                // If the product is valid but not in the forecast, add it as unplanned
+                const isValidProduct = db.products.find(p => p.sku === sku);
+                if (isValidProduct) {
+                    addUnplannedRequestItem(sku, newQty);
+                    found = true; 
+                }
+            }
+            return found;
+        }
+
+        function populateForecastForRequest() {
+            const select = document.getElementById('br_fc_select');
+            select.innerHTML = '<option value="">-- เลือก Forecast ID เพื่อดึงข้อมูล --</option>';
+            db.forecasts.forEach(h => {
+                if(h.status === 'Approved') {
+                    select.innerHTML += `<option value="${h.fc_id}">${h.fc_id} (${h.branch_name})</option>`;
+                }
+            });
+        }
+
+        function loadForecastForRequest() {
+            const fcId = document.getElementById('br_fc_select').value;
+            const container = document.getElementById('br_items_container');
+            if(!fcId) { container.style.display = 'none'; return; }
+
+            container.style.display = 'block';
+            
+            const items = db.items.filter(i => i.fc_id === fcId);
+            const tbody = document.getElementById('br_items_body');
+            tbody.innerHTML = '';
+            
+            items.forEach(item => {
+                const defaultReq = item.forecast_qty;
+                tbody.innerHTML += `
+                    <tr class="br-item-row" data-itemid="${item.item_id}" data-sku="${item.sku}" style="border-bottom: 1px solid var(--border-color); transition: all 0.2s;">
+                        <td style="padding: 1rem;">
+                            <span style="font-size: 0.85rem; font-weight: 600; background: #e2e8f0; color: var(--secondary); padding: 0.35rem 0.5rem; border-radius: 6px; display: inline-block; white-space: nowrap;">${item.sku}</span>
+                        </td>
+                        <td style="padding: 1rem;">
+                            <div style="font-weight: 600; color: var(--text-main); font-size: 1rem; line-height: 1.4;">${item.product_name}</div>
+                        </td>
+                        <td style="text-align: center; padding: 1rem;">
+                            <span style="font-size: 1.25rem; font-weight: 700; color: var(--secondary);">${item.forecast_qty}</span>
+                        </td>
+                        <td style="padding: 1rem; text-align: center; background: var(--primary-light);">
+                            <div style="display: flex; justify-content: center;">
+                                <input type="number" class="br-req-qty" value="${defaultReq}" min="0" onfocus="this.select()" oninput="checkRequestQty(this, ${item.forecast_qty})" style="width: 100%; max-width: 120px; text-align: center; font-size: 1.1rem; font-weight: bold; color: var(--primary); padding: 0.6rem; border: 2px solid var(--border-color); border-radius: 8px; background: #fff; transition: all 0.2s; outline: none;" onfocus="this.style.borderColor='var(--primary)'; this.style.boxShadow='0 0 0 3px rgba(37,99,235,0.1)'">
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+
+        function resetRequestForm() {
+            document.getElementById('br_fc_select').value = '';
+            document.getElementById('rq_date').value = new Date().toISOString().split('T')[0];
+            document.getElementById('br_items_container').style.display = 'none';
+        }
+
+        function saveBranchRequest() {
+            const fcId = document.getElementById('br_fc_select').value;
+            if(!fcId) return;
+
+            const forecast = db.forecasts.find(f => f.fc_id === fcId);
+            const rqId = generateId('RQ'); 
+
+            db.requests.push({
+                rq_id: rqId,
+                fc_id: fcId,
+                branch_name: forecast.branch_name,
+                req_date: document.getElementById('rq_date').value,
+                status: 'Pending' 
+            });
+
+            const rows = document.querySelectorAll('.br-item-row');
+            rows.forEach(row => {
+                const itemId = row.getAttribute('data-itemid');
+                const reqQty = parseInt(row.querySelector('.br-req-qty').value) || 0;
+                
+                if (itemId === 'new') {
+                    let sku = row.getAttribute('data-sku');
+                    if (!sku) { 
+                        const selectEl = row.querySelector('.br-new-sku-select');
+                        if(selectEl) sku = selectEl.value;
+                    }
+                    
+                    if (sku && reqQty > 0) {
+                        const prod = db.products.find(p => p.sku === sku);
+                        db.items.push({
+                            item_id: Date.now() + Math.random(),
+                            fc_id: fcId,
+                            sku: sku,
+                            product_name: prod ? prod.name : sku,
+                            forecast_qty: 0, 
+                            request_qty: reqQty,
+                            issued_qty: 0,
+                            diff_qty: 0,
+                            item_status: 'Pending'
+                        });
+                    }
+                } else {
+                    const dbItem = db.items.find(i => i.item_id === parseFloat(itemId));
+                    if(dbItem) dbItem.request_qty = reqQty; 
+                }
+            });
+
+            saveToDb();
+            alert(`สร้างเอกสารใบขอเบิกเลขที่: ${rqId} เรียบร้อยแล้ว`);
+            resetRequestForm();
+            
+            switchPage('page-rq-history', 'ประวัติเอกสารใบเบิก');
+            
+            const dropToggle = document.querySelectorAll('.nav-dropdown-toggle')[2];
+            dropToggle.classList.add('open');
+            dropToggle.nextElementSibling.classList.add('open');
+            document.querySelectorAll('.sub-nav-btn')[8].classList.add('active'); 
+        }
+
+        function renderRequestList() {
+            const tbody = document.getElementById('rq_list_body');
+            if(!tbody) return;
+            tbody.innerHTML = '';
+            [...db.requests].reverse().forEach(r => {
+                tbody.innerHTML += `
+                    <tr>
+                        <td><strong>${r.rq_id}</strong></td>
+                        <td>${r.fc_id}</td>
+                        <td>${r.branch_name}</td>
+                        <td>${r.req_date}</td>
+                        <td>${getStatusBadge(r.status)}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        // --- 6. Module: Warehouse Issue ---
+        function populateRequestForIssue() {
+            const select = document.getElementById('wh_rq_select');
+            if(!select) return;
+            select.innerHTML = '<option value="">-- เลือก Request ID --</option>';
+            db.requests.forEach(r => {
+                if(r.status === 'Pending') {
+                    select.innerHTML += `<option value="${r.rq_id}">${r.rq_id} (อ้างอิง: ${r.fc_id})</option>`;
+                }
+            });
+        }
+
+        function loadRequestForIssue() {
+            const rqId = document.getElementById('wh_rq_select').value;
+            const container = document.getElementById('wh_items_container');
+            if(!rqId) { container.style.display = 'none'; return; }
+
+            const request = db.requests.find(r => r.rq_id === rqId);
+            if(!request) return;
+
+            container.style.display = 'block';
+            document.getElementById('wh_title').innerText = `รายการจัดส่งสำหรับใบเบิก: ${rqId}`;
+            
+            const items = db.items.filter(i => i.fc_id === request.fc_id);
+            const tbody = document.getElementById('wh_items_body');
+            tbody.innerHTML = '';
+            
+            items.forEach(item => {
+                tbody.innerHTML += `
+                    <tr id="wh_row_${item.item_id}" data-id="${item.item_id}" data-fc="${item.forecast_qty}">
+                        <td><span style="font-size: 0.75rem; font-weight: bold; background: #f1f5f9; padding: 0.2rem 0.5rem; border-radius: 4px; border: 1px solid var(--border-color); white-space: nowrap;">${item.sku}</span></td>
+                        <td><div style="font-weight: 600; color: var(--text-main); line-height: 1.4;">${item.product_name}</div></td>
+                        <td style="text-align: center;">${item.forecast_qty}</td>
+                        <td style="text-align: center;"><strong>${item.request_qty}</strong></td>
+                        <td style="text-align: center;"><input type="number" class="wh-iss-qty" value="${item.request_qty}" min="0" style="width:100px; text-align:center;" oninput="calcWarehouseDiff(${item.item_id})"></td>
+                        <td id="wh_diff_${item.item_id}" style="text-align: center; font-weight: bold;">0</td>
+                        <td id="wh_status_${item.item_id}" style="text-align: center;">-</td>
+                    </tr>
+                `;
+                calcWarehouseDiff(item.item_id);
+            });
+        }
+
+        function calcWarehouseDiff(itemId) {
+            const row = document.getElementById(`wh_row_${itemId}`);
+            const fcQty = parseInt(row.getAttribute('data-fc'));
+            const issQtyInput = row.querySelector('.wh-iss-qty').value;
+            
+            if(issQtyInput === '') {
+                row.className = '';
+                document.getElementById(`wh_diff_${itemId}`).innerText = '-';
+                document.getElementById(`wh_status_${itemId}`).innerText = 'Pending';
+                return;
+            }
+
+            const issQty = parseInt(issQtyInput) || 0;
+            const diff = issQty - fcQty; 
+            
+            const diffCell = document.getElementById(`wh_diff_${itemId}`);
+            const statusCell = document.getElementById(`wh_status_${itemId}`);
+            
+            diffCell.innerText = diff > 0 ? `+${diff}` : diff;
+
+            row.classList.remove('row-green', 'row-red', 'row-yellow');
+            if(issQty === fcQty) {
+                row.classList.add('row-green');
+                statusCell.innerHTML = '<span class="text-green">Match (ตรงแผน)</span>';
+            } else if (issQty < fcQty) {
+                row.classList.add('row-red');
+                statusCell.innerHTML = '<span class="text-red">Short (จ่ายขาด)</span>';
+            } else if (issQty > fcQty) {
+                row.classList.add('row-yellow');
+                statusCell.innerHTML = '<span class="text-yellow">Over (จ่ายเกิน)</span>';
+            }
+        }
+
+        function saveWarehouseIssue() {
+            const rqId = document.getElementById('wh_rq_select').value;
+            if(!rqId) return;
+            const request = db.requests.find(r => r.rq_id === rqId);
+            
+            const rows = document.querySelectorAll('#wh_items_body tr');
+            let allIssued = true;
+
+            rows.forEach(row => {
+                const itemId = parseFloat(row.getAttribute('data-id'));
+                const fcQty = parseInt(row.getAttribute('data-fc'));
+                const issQtyInput = row.querySelector('.wh-iss-qty').value;
+                
+                if(issQtyInput === '') allIssued = false;
+
+                const issQty = parseInt(issQtyInput) || 0;
+                const dbItem = db.items.find(i => i.item_id === itemId);
+                
+                if(dbItem) {
+                    dbItem.issued_qty = issQty;
+                    dbItem.diff_qty = issQty - fcQty;
+                    if(issQty === fcQty) dbItem.item_status = 'Match';
+                    else if(issQty < fcQty) dbItem.item_status = 'Short';
+                    else dbItem.item_status = 'Over';
+                }
+            });
+
+            if(allIssued && rows.length > 0) {
+                request.status = 'Issued';
+                
+                const forecast = db.forecasts.find(f => f.fc_id === request.fc_id);
+                if(forecast) forecast.status = 'Closed';
+                
+                alert(`บันทึกการจ่ายสินค้าสำหรับใบเบิก ${rqId} เรียบร้อยแล้ว (ปิด Forecast อัตโนมัติ)`);
+            }
+
+            saveToDb();
+            document.getElementById('wh_rq_select').value = '';
+            document.getElementById('wh_items_container').style.display = 'none';
+            populateRequestForIssue(); 
+        }
+
+        // --- 7. Module: Report & Dashboard ---
+        function populateDashboardFilters() {
+            const periodSelect = document.getElementById('dash_period_filter');
+            const branchSelect = document.getElementById('dash_branch_filter');
+            const skuSelect = document.getElementById('dash_sku_filter');
+
+            if (periodSelect) {
+                const currentPeriod = periodSelect.value;
+                periodSelect.innerHTML = '<option value="ALL">ทั้งหมด</option>';
+                const periods = [...new Set(db.forecasts.map(f => f.forecast_period))];
+                periods.forEach(p => {
+                    periodSelect.innerHTML += `<option value="${p}">${p}</option>`;
+                });
+                if(currentPeriod) periodSelect.value = currentPeriod;
+            }
+
+            if (branchSelect) {
+                const currentBranch = branchSelect.value;
+                branchSelect.innerHTML = '<option value="ALL">ทั้งหมด (All Branches)</option>';
+                db.branches.forEach(b => {
+                    branchSelect.innerHTML += `<option value="${b.code}">${b.code} (${b.name})</option>`;
+                });
+                if(currentBranch) branchSelect.value = currentBranch;
+            }
+
+            if (skuSelect) {
+                const currentSku = skuSelect.value;
+                skuSelect.innerHTML = '<option value="ALL">ทั้งหมด</option>';
+                db.products.forEach(p => {
+                    skuSelect.innerHTML += `<option value="${p.sku}">${p.sku} (${p.name})</option>`;
+                });
+                if(currentSku) skuSelect.value = currentSku;
+            }
+        }
+
+        function resetDashboardFilters() {
+            document.getElementById('dash_period_filter').value = 'ALL';
+            document.getElementById('dash_branch_filter').value = 'ALL';
+            document.getElementById('dash_sku_filter').value = 'ALL';
+            renderReport();
+        }
+
+        function renderReport() {
+            const periodFilter = document.getElementById('dash_period_filter').value;
+            const branchFilter = document.getElementById('dash_branch_filter').value;
+            const skuFilter = document.getElementById('dash_sku_filter').value;
+            
+            const tbody = document.getElementById('rpt_body');
+            if(!tbody) return;
+            tbody.innerHTML = '';
+
+            let combinedData = [];
+            
+            // Join Data
+            db.items.forEach(item => {
+                const forecast = db.forecasts.find(h => h.fc_id === item.fc_id);
+                if(forecast) {
+                    combinedData.push({ 
+                        ...item, 
+                        branch_name: forecast.branch_name,
+                        forecast_period: forecast.forecast_period,
+                        fc_status: forecast.status
+                    });
+                }
+            });
+
+            // Apply Filters
+            if(periodFilter !== 'ALL') combinedData = combinedData.filter(d => d.forecast_period === periodFilter);
+            if(branchFilter !== 'ALL') combinedData = combinedData.filter(d => d.branch_name === branchFilter);
+            if(skuFilter !== 'ALL') combinedData = combinedData.filter(d => d.sku === skuFilter);
+
+            // Calculate KPIs
+            let totalForecast = 0;
+            let totalIssued = 0;
+            let totalAbsoluteError = 0;
+            
+            // Pending forecasts: count unique active fc_ids
+            const uniqueActiveFcIds = new Set(
+                combinedData.filter(d => d.fc_status !== 'Closed').map(d => d.fc_id)
+            );
+            const totalPending = uniqueActiveFcIds.size;
+
+            // Tracking for Alerts
+            let skuShortages = {};
+            let branchDiffs = {};
+
+            combinedData.forEach(d => {
+                totalForecast += d.forecast_qty || 0;
+                totalIssued += d.issued_qty || 0;
+                
+                // Only count error if it has been issued (or partially issued)
+                if (d.item_status && d.item_status !== 'Pending') {
+                    const diff = d.diff_qty || 0;
+                    totalAbsoluteError += Math.abs(diff);
+
+                    // Track Shortages by SKU
+                    if (diff < 0) {
+                        if (!skuShortages[d.sku]) skuShortages[d.sku] = { name: d.product_name, shortQty: 0 };
+                        skuShortages[d.sku].shortQty += Math.abs(diff);
+                    }
+
+                    // Track Absolute Diff by Branch
+                    if (!branchDiffs[d.branch_name]) branchDiffs[d.branch_name] = 0;
+                    branchDiffs[d.branch_name] += Math.abs(diff);
+                }
+
+                // --- Render Table Row ---
+                let diffHtml = d.diff_qty;
+                let diffPctHtml = `<span style="color:#cbd5e1;">-</span>`;
+                let statusHtml = '<span class="status-badge" style="background:#f1f5f9; color:#64748b;">Pending</span>';
+
+                if (d.item_status && d.item_status !== 'Pending') {
+                    let pct = 0;
+                    if (d.forecast_qty > 0) {
+                        pct = (d.diff_qty / d.forecast_qty) * 100;
+                    } else if (d.forecast_qty === 0 && d.issued_qty > 0) {
+                        pct = 100; // คิดเป็น 100% กรณีไม่ได้ทำ forecast แต่มีการจ่ายของ
+                    }
+
+                    let pctStr = Math.abs(pct).toFixed(1) + '%';
+
+                    if (d.diff_qty > 0) {
+                        diffHtml = `<span class="text-yellow">+${d.diff_qty}</span>`;
+                        diffPctHtml = `<span class="text-yellow">+${pctStr}</span>`;
+                        statusHtml = '<span class="status-badge" style="background:var(--warning-bg); color:#d97706;">ส่งเกิน</span>';
+                    } else if (d.diff_qty < 0) {
+                        diffHtml = `<span class="text-red">${d.diff_qty}</span>`;
+                        diffPctHtml = `<span class="text-red">-${pctStr}</span>`;
+                        statusHtml = '<span class="status-badge" style="background:var(--danger-bg); color:var(--danger);">ส่งขาด</span>';
+                    } else {
+                        diffHtml = `<span class="text-green">0</span>`;
+                        diffPctHtml = `<span class="text-green">0.0%</span>`;
+                        statusHtml = '<span class="status-badge" style="background:var(--success-bg); color:var(--success);">ครบถ้วน</span>';
+                    }
+                } else {
+                    diffHtml = `<span style="color:#cbd5e1;">-</span>`;
+                }
+
+                tbody.innerHTML += `
+                    <tr>
+                        <td><span style="font-size:0.75rem; background:#f1f5f9; padding:2px 4px; border-radius:4px; border:1px solid var(--border-color); font-weight:bold; white-space: nowrap;">${d.sku}</span></td>
+                        <td><div style="font-weight:bold; color:var(--text-main); line-height: 1.4;">${d.product_name}</div></td>
+                        <td style="color:var(--secondary); font-weight:bold;">${d.branch_name}</td>
+                        <td style="text-align:right;">${d.forecast_qty}</td>
+                        <td style="text-align:right;">${d.item_status === 'Pending' ? '-' : d.issued_qty}</td>
+                        <td style="text-align:right; font-weight:bold;">${diffHtml}</td>
+                        <td style="text-align:right; font-weight:bold;">${diffPctHtml}</td>
+                        <td style="text-align:center;">${statusHtml}</td>
+                    </tr>
+                `;
+            });
+
+            if(combinedData.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--secondary);">ไม่พบข้อมูลจากตัวกรองที่เลือก</td></tr>`;
+            }
+
+            // Update KPI DOM
+            document.getElementById('kpi-forecast').innerText = totalForecast.toLocaleString();
+            document.getElementById('kpi-issued').innerText = totalIssued.toLocaleString();
+            document.getElementById('kpi-pending').innerText = totalPending;
+
+            let accuracy = 0;
+            if (totalForecast > 0) {
+                // Accuracy = Max(0, 100 - (Total Abs Error / Total Forecast * 100))
+                accuracy = Math.max(0, 100 - ((totalAbsoluteError / totalForecast) * 100));
+            } else if (totalForecast === 0 && totalIssued > 0) {
+                accuracy = 0; // 0 forecast but issued something
+            } else {
+                accuracy = 100; // 0 forecast, 0 issued -> technically 100% accurate
+            }
+            document.getElementById('kpi-accuracy').innerText = accuracy.toFixed(1) + '%';
+
+            // Render Alerts: Top Shortages
+            const topShortages = Object.entries(skuShortages)
+                .sort((a, b) => b[1].shortQty - a[1].shortQty)
+                .slice(0, 3);
+            
+            const alertShortageList = document.getElementById('alert-shortage-list');
+            if (topShortages.length > 0) {
+                alertShortageList.innerHTML = topShortages.map(s => `
+                    <div style="display:flex; justify-content:space-between; border-bottom:1px dashed #fee2e2; padding-bottom:0.25rem;">
+                        <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:10px;">${s[1].name}</span>
+                        <span style="font-weight:bold; color:var(--danger);">- ${s[1].shortQty}</span>
+                    </div>
+                `).join('');
+            } else {
+                alertShortageList.innerHTML = '<span style="color:var(--success);"><i data-lucide="check-circle" style="width:16px;height:16px;display:inline-block;vertical-align:-3px;"></i> ไม่มีปัญหาสินค้าส่งขาด</span>';
+            }
+
+            // Render Alerts: High Diff Branches
+            const topBranches = Object.entries(branchDiffs)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 3);
+
+            const alertDiffList = document.getElementById('alert-diff-list');
+            if (topBranches.length > 0 && topBranches[0][1] > 0) {
+                alertDiffList.innerHTML = topBranches.map(b => `
+                    <div style="display:flex; justify-content:space-between; border-bottom:1px dashed #fef3c7; padding-bottom:0.25rem;">
+                        <span>สาขา ${b[0]}</span>
+                        <span style="font-weight:bold; color:#d97706;">คลาดเคลื่อน ${b[1]} ชิ้น</span>
+                    </div>
+                `).join('');
+            } else {
+                alertDiffList.innerHTML = '<span style="color:var(--success);"><i data-lucide="check-circle" style="width:16px;height:16px;display:inline-block;vertical-align:-3px;"></i> ทุกสาขาตรงตามแผน</span>';
+            }
+        }
+
+        // --- Initialize ---
+        window.onload = () => {
+            refreshAllDropdowns(); 
+            // Set Dashboard as the default active page on load
+            switchPage('page-report', 'Executive Dashboard');
+            document.getElementById('rq_date').value = new Date().toISOString().split('T')[0];
+        };
+
+    </script>
+</body>
+</html>
