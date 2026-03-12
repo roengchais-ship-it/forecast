@@ -800,8 +800,20 @@
                 <!-- ================= PAGE 1.10: PRODUCTION - HISTORY ================= -->
                 <div id="page-production-history" class="page">
                     <div class="card" style="border-radius: 24px;">
-                        <div class="card-header">
-                            <h2 style="display: flex; align-items: center; gap: 0.5rem;"><span>🗂️</span> ประวัติแผนสั่งผลิต (Production History)</h2>
+                        <!-- ปรับปรุง Card Header ใส่ Filter และ Export Button -->
+                        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                            <h2 style="display: flex; align-items: center; gap: 0.5rem; margin: 0;">
+                                <span>🗂️</span> ประวัติแผนสั่งผลิต (Production History)
+                            </h2>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <label style="font-size: 0.85rem; color: var(--secondary); white-space: nowrap;">กรองตามรอบ (Period):</label>
+                                <select id="hist_period_filter" onchange="renderProductionList()" style="border-radius: 8px; padding: 0.4rem 0.75rem; border: 1px solid var(--border-color); background: #f8fafc; outline: none; cursor: pointer;">
+                                    <option value="ALL">ทั้งหมด (All)</option>
+                                </select>
+                                <button class="btn btn-success btn-sm" onclick="exportProductionPlanExcel()" style="border-radius: 8px; box-shadow: 0 2px 4px rgba(16,185,129,0.2); display: flex; align-items: center; gap: 0.4rem;">
+                                    <span style="font-size: 1.1rem;">📊</span> Export Excel
+                                </button>
+                            </div>
                         </div>
                         <div class="table-responsive">
                             <table>
@@ -1086,7 +1098,7 @@
 
     <!-- ================= JAVASCRIPT LOGIC ================= -->
     <script>
-        // --- 3. UI Helpers (นำกลับมาให้ครบถ้วน) ---
+        // --- 3. UI Helpers ---
         function generateId(prefix) {
             const date = new Date();
             const yyyymm = date.getFullYear() + String(date.getMonth() + 1).padStart(2, '0');
@@ -1156,7 +1168,6 @@
         };
         let db = window.db;
 
-        // ฟังก์ชันลบข้อมูล Forecast
         window.clearForecastData = function() {
            if(confirm('⚠️ คุณแน่ใจหรือไม่ว่าต้องการ "ล้างข้อมูล Forecast และประวัติที่เกี่ยวข้องทั้งหมด" ?\n(การกระทำนี้จะลบ แผนผลิต ใบเบิก และรายการทั้งหมด)')) {
                db.forecasts = [];
@@ -1171,7 +1182,6 @@
            }
         }
 
-        // ฟังก์ชันอัปเดตข้อมูลขึ้น Firebase
         function saveToDb() {
             window.db = db; 
             if (window.firebaseSave) {
@@ -1179,7 +1189,6 @@
             }
         }
 
-        // ฟังก์ชันรับข้อมูลจาก Firebase มาอัปเดตหน้าจอ
         window.updateLocalDbFromFirebase = function(data) {
             db.branches = data.branches || [];
             db.products = data.products || [];
@@ -1203,7 +1212,7 @@
                 if(pageId === 'page-forecast' || pageId === 'page-fc-history') renderForecastList();
                 if(pageId === 'page-production-calc') { populateProductionCalcDropdown(); loadProductionCalcItems(); }
                 if(pageId === 'page-production-job') { populateProductionJobDropdown(); loadProductionJobItems(); }
-                if(pageId === 'page-production-history') renderProductionList();
+                if(pageId === 'page-production-history') { populateHistPeriodFilter(); renderProductionList(); }
                 if(pageId === 'page-branch') { populateForecastForRequest(); loadForecastForRequest(); }
                 if(pageId === 'page-rq-history') renderRequestList();
                 if(pageId === 'page-warehouse') { populateRequestForIssue(); loadRequestForIssue(); }
@@ -1211,7 +1220,6 @@
             }
         };
 
-        // ฟังก์ชันสำหรับอัปเดต Dropdown สาขาทั่วทั้งระบบ จาก Master Data (db.branches)
         function refreshAllDropdowns() {
             const fcBranch = document.getElementById('fc_branch');
             if(fcBranch) {
@@ -1222,7 +1230,6 @@
                 });
                 if(currentFcBranch) fcBranch.value = currentFcBranch;
             }
-
             populateDashboardFilters();
         }
 
@@ -1254,7 +1261,6 @@
             document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
             document.querySelectorAll('.nav-btn:not(.nav-dropdown-toggle)').forEach(b => b.classList.remove('active'));
             
-            // Check if nav-btn element exists and has active class method before calling it. This prevents errors when called directly from JS without click event.
             const targetPage = document.getElementById(pageId);
             if (targetPage) {
                targetPage.classList.add('active');
@@ -1274,7 +1280,7 @@
             if(pageId === 'page-forecast' || pageId === 'page-fc-history') renderForecastList();
             if(pageId === 'page-production-calc') populateProductionCalcDropdown(); 
             if(pageId === 'page-production-job') populateProductionJobDropdown();
-            if(pageId === 'page-production-history') renderProductionList();
+            if(pageId === 'page-production-history') { populateHistPeriodFilter(); renderProductionList(); }
             if(pageId === 'page-branch') populateForecastForRequest();
             if(pageId === 'page-rq-history') renderRequestList();
             if(pageId === 'page-warehouse') populateRequestForIssue();
@@ -1485,7 +1491,6 @@
             });
         }
 
-        // --- NEW: Import Master Products ---
         function processMasterProductImport(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -1553,11 +1558,6 @@
                 }
             }
         }
-
-        // ยังคงรองรับการเรียกใช้ฟังก์ชันเดิมเพื่อ Backward Compatibility
-        function addMatrixBranch() { openBranchModal(); }
-        function addMatrixProduct() { openProductModal(); }
-        function addMasterProduct() { openProductModal(); }
 
         function deleteMasterProduct(sku) {
             if(confirm(`ยืนยันการลบสินค้า SKU: ${sku} ?`)) {
@@ -1649,7 +1649,6 @@
             const tbody = document.getElementById('matrix-tbody');
             if(!thead || !tbody) return;
             
-            // 1. Render Headers
             let thHtml = `<th>SKU</th><th>Product Name</th>`;
             db.branches.forEach(b => {
                 thHtml += `<th><div style="font-size: 0.75rem; text-align: center; color: var(--primary);">${b.code}<br><span style="font-weight:normal; color:var(--secondary); font-size:0.65rem;">${b.name}</span></div></th>`;
@@ -1657,20 +1656,17 @@
             thHtml += `<th>Total Qty</th>`;
             thead.innerHTML = thHtml;
             
-            // 2. Render Body Rows
             tbody.innerHTML = '';
             db.products.forEach(prod => {
                 let tr = document.createElement('tr');
                 tr.dataset.sku = prod.sku;
                 
-                // Sticky Left Cells
                 let tdHtml = `
                     <td><span style="font-size: 0.75rem; font-weight: bold; color: var(--secondary); background:#f1f5f9; padding:2px 4px; border-radius:4px; border: 1px solid var(--border-color); white-space: nowrap;">${prod.sku}</span></td>
                     <td><div style="font-size: 0.85rem; font-weight: bold; color: var(--text-main); line-height: 1.4;">${prod.name}</div></td>
                 `;
                 
                 let rowTotal = 0;
-                // Branch Input Cells
                 db.branches.forEach(b => {
                     let val = (matrixInputState[prod.sku] && matrixInputState[prod.sku][b.code]) ? matrixInputState[prod.sku][b.code] : '0';
                     rowTotal += parseInt(val) || 0;
@@ -1683,7 +1679,6 @@
                     `;
                 });
                 
-                // Sticky Right Total Cell
                 tdHtml += `<td class="matrix-total-cell" style="font-size: 1.15rem;">${rowTotal}</td>`;
                 
                 tr.innerHTML = tdHtml;
@@ -1708,7 +1703,6 @@
             row.querySelector('.matrix-total-cell').innerText = total;
         }
 
-        // --- NEW: Import Excel for Matrix ---
         function processMatrixExcelImport(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -2042,7 +2036,6 @@
             const tbody = document.getElementById('prod_calc_items_body');
             tbody.innerHTML = '';
             
-            // ตัวแปรสำหรับคำนวณผลรวมภาพใหญ่ด้านบน
             let totalA = 0;
             
             Object.values(aggregatedItems).forEach(item => {
@@ -2080,9 +2073,8 @@
                 `;
             });
             
-            // อัปเดต Summary Cards
             document.getElementById('calc-total-fc').innerText = totalA.toLocaleString();
-            document.getElementById('calc-total-target').innerText = totalA.toLocaleString(); // เริ่มต้น Target = Forecast
+            document.getElementById('calc-total-target').innerText = totalA.toLocaleString(); 
         }
 
         function calcProductionQty(inputElement) {
@@ -2097,18 +2089,17 @@
             const displayDiv = row.querySelector('.buffer-qty-display');
 
             if (bufferType === 'percent') {
-                bufferQty = Math.ceil(fcQty * (bufferInput / 100)); // ปัดเศษขึ้นเสมอเพื่อให้ของพอ
+                bufferQty = Math.ceil(fcQty * (bufferInput / 100)); 
                 if (bufferInput > 0) {
                     displayDiv.innerText = `≈ ${bufferQty} ชิ้น`;
                 } else {
                     displayDiv.innerText = '';
                 }
             } else {
-                bufferQty = Math.floor(bufferInput); // กรณีเป็นชิ้นก็ดึงเลขมาเลย
+                bufferQty = Math.floor(bufferInput); 
                 displayDiv.innerText = ''; 
             }
 
-            // บันทึกค่าที่แท้จริงไว้ใน hidden input
             row.querySelector('.prod-buffer-qty').value = bufferQty;
             
             let prodTarget = (fcQty - stockQty) + bufferQty;
@@ -2121,7 +2112,6 @@
             if(prodTarget > 0) resultSpan.style.color = 'var(--primary)';
             else resultSpan.style.color = 'var(--success)';
             
-            // อัปเดต Summary Cards หลังจากมีการแก้ตัวเลข
             updateProductionSummaryCards();
         }
         
@@ -2181,7 +2171,6 @@
                 });
             });
 
-            // เพิ่มการแจ้งเตือนหากคำนวณแล้วเป้าผลิตเป็น 0 ทุกรายการ
             if(totalTarget <= 0) {
                 if(!confirm("⚠️ เป้าหมายการผลิตสุทธิรวมเป็น 0 ชิ้น (อาจเพราะสต็อกมีเพียงพอแล้ว)\nคุณยืนยันที่จะบันทึกแผนผลิตนี้ใช่หรือไม่?")) {
                     return;
@@ -2202,7 +2191,7 @@
             document.querySelectorAll('.sub-nav-btn')[5].classList.add('active'); 
         }
 
-        // --- 4.6. Module: Production Job (บันทึกผลิตจริง / ทยอยผลิต) ---
+        // --- 4.6. Module: Production Job ---
         function populateProductionJobDropdown() {
             const select = document.getElementById('prod_job_select');
             select.innerHTML = '<option value="">-- เลือกแผนผลิตที่กำลังดำเนินการ --</option>';
@@ -2290,20 +2279,46 @@
                 document.getElementById('prod_job_select').value = '';
                 document.getElementById('prod_job_items_container').style.display = 'none';
                 populateProductionJobDropdown(); 
+                populateHistPeriodFilter();
                 renderProductionList(); 
             } else {
                 saveToDb();
                 alert(`บันทึกยอดผลิต ${addQty} ชิ้น สำหรับ ${item.product_name} เรียบร้อยแล้ว`);
                 loadProductionJobItems(); 
+                populateHistPeriodFilter();
                 renderProductionList(); 
             }
         }
 
+        // --- NEW: Production History Functions with Filter and Export ---
+        function populateHistPeriodFilter() {
+            const select = document.getElementById('hist_period_filter');
+            if (!select) return;
+            const currentVal = select.value;
+            select.innerHTML = '<option value="ALL">ทั้งหมด (All)</option>';
+            
+            const periods = [...new Set(db.productions.map(p => p.ref_period))].sort().reverse();
+            periods.forEach(period => {
+                select.innerHTML += `<option value="${period}">${period}</option>`;
+            });
+            
+            if (periods.includes(currentVal)) {
+                select.value = currentVal;
+            }
+        }
+
         function renderProductionList() {
+            const filterPeriod = document.getElementById('hist_period_filter').value;
             const tbody = document.getElementById('prod_list_body');
+            if(!tbody) return;
             tbody.innerHTML = '';
             
-            [...db.productions].reverse().forEach(p => {
+            let filteredProds = [...db.productions].reverse();
+            if (filterPeriod !== 'ALL') {
+                filteredProds = filteredProds.filter(p => p.ref_period === filterPeriod);
+            }
+
+            filteredProds.forEach(p => {
                 let totalTarget = 0;
                 let totalProduced = 0;
                 
@@ -2333,10 +2348,65 @@
                     </tr>
                 `;
             });
+
+            if(filteredProds.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 2rem; color: var(--secondary);">ไม่พบประวัติแผนผลิตในรอบที่เลือก</td></tr>`;
+            }
+        }
+
+        function exportProductionPlanExcel() {
+            if (db.productions.length === 0) {
+                alert('⚠️ ยังไม่มีข้อมูลประวัติแผนสั่งผลิตในระบบ');
+                return;
+            }
+
+            const filterPeriod = document.getElementById('hist_period_filter').value;
+            let prodsToExport = db.productions;
+            
+            if (filterPeriod !== 'ALL') {
+                prodsToExport = prodsToExport.filter(p => p.ref_period === filterPeriod);
+            }
+
+            if (prodsToExport.length === 0) {
+                alert('⚠️ ไม่พบข้อมูลแผนผลิตในรอบที่เลือกสำหรับ Export');
+                return;
+            }
+
+            let exportData = [];
+
+            prodsToExport.forEach(prod => {
+                prod.items.forEach(item => {
+                    if (item.target_qty > 0) {
+                        exportData.push({
+                            'Production ID': prod.prod_id,
+                            'รอบการขาย (Period)': prod.ref_period,
+                            'วันที่สร้างแผน': prod.prod_date,
+                            'สถานะภาพรวม': prod.status,
+                            'รหัสสินค้า (SKU)': item.sku,
+                            'ชื่อสินค้า': item.product_name,
+                            'เป้าผลิต (Target)': item.target_qty,
+                            'ผลิตสำเร็จแล้ว (Done)': item.produced_qty || 0,
+                            'ค้างผลิต (Remaining)': item.target_qty - (item.produced_qty || 0)
+                        });
+                    }
+                });
+            });
+
+            if (exportData.length === 0) {
+                alert('⚠️ ไม่พบรายการสินค้าที่มีเป้าหมายการผลิตในรอบที่เลือก');
+                return;
+            }
+
+            const ws = XLSX.utils.json_to_sheet(exportData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Production Plan Details");
+
+            const periodStr = filterPeriod === 'ALL' ? 'All_Periods' : filterPeriod;
+            const fileName = `Production_Plan_${periodStr}_${new Date().toISOString().split('T')[0]}.xlsx`;
+            XLSX.writeFile(wb, fileName);
         }
 
         // --- 5. Module: Branch Request ---
-        
         function processBranchRequestImport(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -2525,10 +2595,8 @@
             `;
             tbody.appendChild(tr);
 
-            // เพิ่มการเลื่อนหน้าจอ (Scroll) อัตโนมัติไปยังรายการที่เพิ่งเพิ่ม
             setTimeout(() => {
                 tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                // โฟกัสไปที่ช่องเลือกสินค้าหรือช่องกรอกจำนวน เพื่อให้ผู้ใช้ทำงานต่อได้ทันที
                 const focusEl = tr.querySelector('.br-new-sku-select') || tr.querySelector('.br-req-qty');
                 if (focusEl) focusEl.focus();
             }, 100);
@@ -2553,7 +2621,6 @@
             rows.forEach(row => {
                 let rowSku = row.getAttribute('data-sku');
                 if (!rowSku) {
-                    // Fallback for manual inputs that might not have data-sku set yet
                     const spans = row.querySelectorAll('span');
                     spans.forEach(span => {
                         if(span.innerText.trim().includes(sku)) rowSku = sku;
@@ -2565,7 +2632,6 @@
                     if (inputQty) {
                         inputQty.value = newQty;
                         
-                        // Check if it's over forecast and highlight
                         const fcQtyText = row.querySelector('td:nth-child(3) span').innerText;
                         const fcQty = parseInt(fcQtyText) || 0;
                         
@@ -2574,7 +2640,6 @@
                             inputQty.style.backgroundColor = 'var(--warning-bg)';
                             inputQty.style.color = 'var(--warning)';
                         } else if (fcQty === 0) {
-                            // Let the Unplanned item logic keep it red
                             inputQty.style.borderColor = 'var(--danger)';
                             inputQty.style.color = 'var(--danger)';
                         } else {
@@ -2593,7 +2658,6 @@
             });
             
             if (!found) {
-                // If the product is valid but not in the forecast, add it as unplanned
                 const isValidProduct = db.products.find(p => p.sku === sku);
                 if (isValidProduct) {
                     addUnplannedRequestItem(sku, newQty);
@@ -2962,7 +3026,7 @@
                     if (d.forecast_qty > 0) {
                         pct = (d.diff_qty / d.forecast_qty) * 100;
                     } else if (d.forecast_qty === 0 && d.issued_qty > 0) {
-                        pct = 100; // คิดเป็น 100% กรณีไม่ได้ทำ forecast แต่มีการจ่ายของ
+                        pct = 100; 
                     }
 
                     let pctStr = Math.abs(pct).toFixed(1) + '%';
@@ -3009,12 +3073,11 @@
 
             let accuracy = 0;
             if (totalForecast > 0) {
-                // Accuracy = Max(0, 100 - (Total Abs Error / Total Forecast * 100))
                 accuracy = Math.max(0, 100 - ((totalAbsoluteError / totalForecast) * 100));
             } else if (totalForecast === 0 && totalIssued > 0) {
-                accuracy = 0; // 0 forecast but issued something
+                accuracy = 0; 
             } else {
-                accuracy = 100; // 0 forecast, 0 issued -> technically 100% accurate
+                accuracy = 100; 
             }
             document.getElementById('kpi-accuracy').innerText = accuracy.toFixed(1) + '%';
 
@@ -3056,7 +3119,6 @@
         // --- Initialize ---
         window.onload = () => {
             refreshAllDropdowns(); 
-            // Set Dashboard as the default active page on load
             switchPage('page-report', 'Executive Dashboard');
             document.getElementById('rq_date').value = new Date().toISOString().split('T')[0];
         };
