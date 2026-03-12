@@ -19,6 +19,8 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
         import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-analytics.js";
         import { getFirestore, doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+        // --- NEW: นำเข้า Authentication ---
+        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyCyLQ4R9qTRto3eD68ZpgWHehSZYW4e3IU",
@@ -34,13 +36,72 @@
         const app = initializeApp(firebaseConfig);
         const analytics = getAnalytics(app);
         const dbFirestore = getFirestore(app);
+        const auth = getAuth(app);
+        const provider = new GoogleAuthProvider();
         
         // Document reference for whole application state
         const stateDocRef = doc(dbFirestore, 'system_data', 'shared_state');
         let isLocalSave = false;
 
+        // --- NEW: จัดการสถานะผู้ใช้ (Auth State) ---
+        window.currentUser = null;
+        
+        onAuthStateChanged(auth, (user) => {
+            const loginScreen = document.getElementById('login-screen');
+            const mainApp = document.getElementById('main-app');
+            const userNameDisplay = document.getElementById('display-user-name');
+            
+            if (user) {
+                // ล็อกอินสำเร็จ
+                window.currentUser = user;
+                loginScreen.style.display = 'none';
+                mainApp.style.display = 'flex';
+                userNameDisplay.innerHTML = `👤 <strong>${user.displayName || user.email}</strong>`;
+                
+                // ดึงข้อมูลเมื่อล็อกอินเสร็จ
+                initializeDataSync();
+            } else {
+                // ยังไม่ได้ล็อกอิน
+                window.currentUser = null;
+                loginScreen.style.display = 'flex';
+                mainApp.style.display = 'none';
+            }
+        });
+
+        // --- NEW: ฟังก์ชันล็อกอิน ---
+        window.loginWithGoogle = function() {
+            const loginBtn = document.getElementById('btn-login');
+            loginBtn.innerHTML = 'กำลังเข้าสู่ระบบ...';
+            loginBtn.disabled = true;
+
+            signInWithPopup(auth, provider)
+                .then((result) => {
+                    // เข้าสู่ระบบสำเร็จ (onAuthStateChanged จะทำงานต่อ)
+                }).catch((error) => {
+                    console.error("Login Error:", error);
+                    alert("เกิดข้อผิดพลาดในการล็อกอิน: " + error.message);
+                    loginBtn.innerHTML = 'ล็อกอินด้วย Google';
+                    loginBtn.disabled = false;
+                });
+        };
+
+        // --- NEW: ฟังก์ชันออกจากระบบ ---
+        window.logoutUser = function() {
+            if(confirm("ต้องการออกจากระบบใช่หรือไม่?")) {
+                signOut(auth).catch(error => {
+                    console.error("Logout Error:", error);
+                });
+            }
+        };
+
         // Push local changes to Firebase
         window.firebaseSave = function(localDb) {
+            // ตรวจสอบก่อนว่ามีการล็อกอินหรือไม่
+            if (!window.currentUser) {
+                alert("คุณต้องเข้าสู่ระบบก่อนทำการบันทึกข้อมูล");
+                return;
+            }
+
             isLocalSave = true; // Prevent echo back to the originating device immediately
             if (window.setSyncStatus) window.setSyncStatus('saving');
             
@@ -54,38 +115,51 @@
                 .catch(e => {
                     console.error("Firebase save error:", e);
                     if (window.setSyncStatus) window.setSyncStatus('error');
+                    
+                    // แจ้งเตือนหากติดสิทธิ์ (Permission Denied)
+                    if (e.code === 'permission-denied') {
+                        alert("⚠️ คุณไม่มีสิทธิ์แก้ไขหรือบันทึกข้อมูล\n(ระบบอนุญาตเฉพาะผู้ดูแลที่กำหนดเท่านั้น)");
+                    } else {
+                        alert("เกิดข้อผิดพลาดในการบันทึกข้อมูล: " + e.message);
+                    }
                 });
         };
 
-        // First Time Load / Initialize if empty
-        getDoc(stateDocRef).then((docSnap) => {
-            if (!docSnap.exists() && window.db) {
-                window.firebaseSave(window.db); // Upload initial mock data
-            } else {
-                if (window.setSyncStatus) window.setSyncStatus('synced');
-            }
-        }).catch(err => {
-            console.error("Firebase init error", err);
-            if (window.setSyncStatus) window.setSyncStatus('error');
-        });
+        // ฟังก์ชันแยกสำหรับโหลดข้อมูลครั้งแรก
+        function initializeDataSync() {
+            // First Time Load / Initialize if empty
+            getDoc(stateDocRef).then((docSnap) => {
+                if (!docSnap.exists() && window.db) {
+                    // ป้องกันคนไม่มีสิทธิ์พยายามสร้าง Database ครั้งแรก
+                    if (window.currentUser && window.currentUser.email === "siriwan.b@coroand.co") {
+                        window.firebaseSave(window.db); // Upload initial mock data
+                    }
+                } else {
+                    if (window.setSyncStatus) window.setSyncStatus('synced');
+                }
+            }).catch(err => {
+                console.error("Firebase init error", err);
+                if (window.setSyncStatus) window.setSyncStatus('error');
+            });
 
-        // Listen for Real-time Updates from other devices
-        onSnapshot(stateDocRef, (docSnap) => {
-            if (docSnap.exists() && !isLocalSave) {
-                const data = docSnap.data();
-                if (data && Object.keys(data).length > 0) {
-                    if (window.updateLocalDbFromFirebase) {
-                        if (window.setSyncStatus) window.setSyncStatus('receiving');
-                        window.updateLocalDbFromFirebase(data);
-                        setTimeout(() => {
-                            if (window.setSyncStatus) window.setSyncStatus('synced');
-                        }, 800);
+            // Listen for Real-time Updates from other devices
+            onSnapshot(stateDocRef, (docSnap) => {
+                if (docSnap.exists() && !isLocalSave) {
+                    const data = docSnap.data();
+                    if (data && Object.keys(data).length > 0) {
+                        if (window.updateLocalDbFromFirebase) {
+                            if (window.setSyncStatus) window.setSyncStatus('receiving');
+                            window.updateLocalDbFromFirebase(data);
+                            setTimeout(() => {
+                                if (window.setSyncStatus) window.setSyncStatus('synced');
+                            }, 800);
+                        }
                     }
                 }
-            }
-        }, (error) => {
-            if (window.setSyncStatus) window.setSyncStatus('error');
-        });
+            }, (error) => {
+                if (window.setSyncStatus) window.setSyncStatus('error');
+            });
+        }
     </script>
     <!-- ================= END FIREBASE INTEGRATION ================= -->
 
@@ -117,8 +191,59 @@
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
         body { color: var(--text-main); font-size: 14px; background: var(--bg-main); overflow: hidden; }
 
+        /* ================= Login Screen ================= */
+        .login-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            width: 100vw;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        }
+        .login-box {
+            background: white;
+            padding: 3rem 2.5rem;
+            border-radius: 24px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+            animation: fadeIn 0.5s ease-out;
+        }
+        .login-box h1 {
+            color: var(--text-main);
+            font-size: 1.75rem;
+            margin-bottom: 0.5rem;
+        }
+        .login-box p {
+            color: var(--secondary);
+            margin-bottom: 2rem;
+            font-size: 0.95rem;
+        }
+        .btn-google {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            width: 100%;
+            padding: 0.8rem;
+            background: white;
+            color: #334155;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+        .btn-google:hover {
+            background: #f8fafc;
+            border-color: #94a3b8;
+        }
+
         /* ================= App Layout (Desktop Focus) ================= */
-        .app-layout { display: flex; height: 100vh; width: 100vw; }
+        .app-layout { display: none; height: 100vh; width: 100vw; } /* ซ่อนไว้ก่อนจนกว่าจะล็อกอิน */
         
         /* Sidebar */
         .sidebar { width: var(--sidebar-width); background: var(--bg-sidebar); color: white; display: flex; flex-direction: column; flex-shrink: 0; transition: all 0.3s;}
@@ -145,7 +270,7 @@
         .main-wrapper { flex: 1; display: flex; flex-direction: column; min-width: 0; }
         .topbar { background: white; padding: 1.25rem 2rem; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
         .topbar h1 { font-size: 1.5rem; color: var(--text-main); font-weight: 600; }
-        .user-info { font-size: 0.9rem; color: var(--secondary); background: var(--bg-main); padding: 0.5rem 1rem; border-radius: 999px; border: 1px solid var(--border-color); }
+        .user-info { font-size: 0.9rem; color: var(--secondary); background: var(--bg-main); padding: 0.5rem 1rem; border-radius: 999px; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 0.5rem;}
         
         .content-area { flex: 1; padding: 2rem; overflow-y: auto; }
         .page { display: none; animation: fadeIn 0.3s ease-in-out; }
@@ -369,7 +494,29 @@
 </head>
 <body>
 
-    <div class="app-layout">
+    <!-- ================= LOGIN SCREEN ================= -->
+    <div id="login-screen" class="login-container">
+        <div class="login-box">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">📦</div>
+            <h1>FG Forecast System</h1>
+            <p>ระบบจัดการแผนการผลิตและเบิกจ่ายสินค้า</p>
+            
+            <button id="btn-login" class="btn-google" onclick="loginWithGoogle()">
+                <svg viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg">
+                    <g transform="matrix(1, 0, 0, 1, 27.009001, -39.238998)">
+                        <path fill="#4285F4" d="M -3.264,51.509 C -3.264,50.719 -3.334,49.969 -3.454,49.239 L -14.754,49.239 L -14.754,53.749 L -8.284,53.749 C -8.574,55.229 -9.424,56.479 -10.684,57.329 L -10.684,60.329 L -6.824,60.329 C -4.564,58.239 -3.264,55.159 -3.264,51.509 Z"/>
+                        <path fill="#34A853" d="M -14.754,63.239 C -11.514,63.239 -8.804,62.159 -6.824,60.329 L -10.684,57.329 C -11.764,58.049 -13.134,58.489 -14.754,58.489 C -17.884,58.489 -20.534,56.379 -21.484,53.529 L -25.464,53.529 L -25.464,56.619 C -23.494,60.539 -19.444,63.239 -14.754,63.239 Z"/>
+                        <path fill="#FBBC05" d="M -21.484,53.529 C -21.734,52.809 -21.864,52.039 -21.864,51.239 C -21.864,50.439 -21.724,49.669 -21.484,48.949 L -21.484,45.859 L -25.464,45.859 C -26.284,47.479 -26.754,49.299 -26.754,51.239 C -26.754,53.179 -26.284,54.999 -25.464,56.619 L -21.484,53.529 Z"/>
+                        <path fill="#EA4335" d="M -14.754,43.989 C -12.984,43.989 -11.404,44.599 -10.154,45.789 L -6.734,41.939 C -8.804,39.919 -11.514,38.739 -14.754,38.739 C -19.444,38.739 -23.494,41.439 -25.464,45.859 L -21.484,48.949 C -20.534,46.099 -17.884,43.989 -14.754,43.989 Z"/>
+                    </g>
+                </svg>
+                ล็อกอินด้วย Google
+            </button>
+        </div>
+    </div>
+
+    <!-- ================= MAIN APP ================= -->
+    <div id="main-app" class="app-layout">
         <!-- Sidebar Navigation -->
         <aside class="sidebar">
             <div class="sidebar-brand">
@@ -431,7 +578,11 @@
                         <span id="sync-dot" style="width: 6px; height: 6px; background: #10b981; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 2px rgba(16,185,129,0.2); transition: all 0.3s ease;"></span>
                         <span id="sync-text" style="font-weight: 600;">Connecting...</span>
                     </div>
-                    <div class="user-info">👤 <strong>Admin User</strong> | All Branches</div>
+                    <!-- อัปเดตส่วนแสดงชื่อผู้ใช้ และเพิ่มปุ่ม Logout -->
+                    <div class="user-info">
+                        <span id="display-user-name">👤 <strong>Loading...</strong></span>
+                        <button onclick="logoutUser()" style="background: none; border: none; color: var(--danger); cursor: pointer; font-size: 0.85rem; margin-left: 0.5rem; text-decoration: underline;">ออกจากระบบ</button>
+                    </div>
                 </div>
             </header>
 
@@ -1174,7 +1325,7 @@
                db.productions = [];
                db.requests = [];
                db.items = [];
-               saveToDb();
+               window.firebaseSave(window.db); // เรียกใช้ฟังก์ชันที่ทำการเช็คสิทธิ์แทน
                alert("ล้างข้อมูลเรียบร้อยแล้ว");
                if (window.refreshCurrentView) {
                     window.refreshCurrentView();
