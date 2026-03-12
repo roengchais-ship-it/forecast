@@ -1955,7 +1955,7 @@
             tbody.innerHTML = '';
             items.forEach(i => addForecastItemRow(i.sku, i.product_name, i.forecast_qty));
 
-            const isLocked = forecast.status === 'Approved' || forecast.status === 'Closed';
+            const isLocked = true; // บังคับให้เป็น true เสมอ เพื่อไม่ให้แก้ไขได้
             document.getElementById('fc_branch').disabled = isLocked;
             document.getElementById('fc_period_start').disabled = isLocked;
             document.getElementById('fc_period_end').disabled = isLocked;
@@ -1967,7 +1967,7 @@
             document.getElementById('btn-save-draft').style.display = isLocked ? 'none' : 'inline-flex';
             document.getElementById('btn-approve').style.display = isLocked ? 'none' : 'inline-flex';
             
-            switchPage('page-forecast', 'สร้างแผนสั่งผลิต (Forecast Document)');
+            switchPage('page-forecast', 'ดูรายละเอียดแผนสั่งผลิต (Forecast Document)');
             
             const dropToggle = document.querySelectorAll('.nav-dropdown-toggle')[0];
             dropToggle.classList.add('open');
@@ -1987,7 +1987,7 @@
                         <td>${h.branch_name}</td>
                         <td>${h.forecast_period}</td>
                         <td>${getStatusBadge(h.status)}</td>
-                        <td><button class="btn btn-sm btn-primary" onclick="editForecast('${h.fc_id}')">ดู/แก้ไข</button></td>
+                        <td><button class="btn btn-sm btn-secondary" onclick="editForecast('${h.fc_id}')">ดูรายละเอียด</button></td>
                     </tr>
                 `;
             });
