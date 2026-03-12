@@ -19,8 +19,8 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
         import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-analytics.js";
         import { getFirestore, doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
-        // --- NEW: นำเข้า Authentication ---
-        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
+        // --- NEW: นำเข้า Authentication (ใช้ Email/Password แทน Popup เพื่อเลี่ยงปัญหา Domain) ---
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyCyLQ4R9qTRto3eD68ZpgWHehSZYW4e3IU",
@@ -37,7 +37,6 @@
         const analytics = getAnalytics(app);
         const dbFirestore = getFirestore(app);
         const auth = getAuth(app);
-        const provider = new GoogleAuthProvider();
         
         // Document reference for whole application state
         const stateDocRef = doc(dbFirestore, 'system_data', 'shared_state');
@@ -68,22 +67,46 @@
             }
         });
 
-        // --- NEW: ฟังก์ชันล็อกอิน ---
-        window.loginWithGoogle = function() {
+        // --- FIXED: ฟังก์ชันล็อกอิน (เปลี่ยนมาใช้ Email/Password ชั่วคราวเนื่องจากปัญหา Authorized Domain) ---
+        // หมายเหตุ: ในการใช้งานจริง แนะนำให้เพิ่มโดเมนของแอปนี้ใน Firebase Console > Authentication > Settings > Authorized domains
+        // เพื่อให้สามารถใช้ Google Sign-In ได้อย่างสมบูรณ์
+        window.loginWithEmail = function(event) {
+            event.preventDefault(); // ป้องกันการรีเฟรชหน้าจอเมื่อ submit form
+            
+            const emailInput = document.getElementById('login-email').value;
+            const passwordInput = document.getElementById('login-password').value;
             const loginBtn = document.getElementById('btn-login');
+            
+            if(!emailInput || !passwordInput) {
+                alert("กรุณากรอกอีเมลและรหัสผ่าน");
+                return;
+            }
+
             loginBtn.innerHTML = 'กำลังเข้าสู่ระบบ...';
             loginBtn.disabled = true;
 
-            signInWithPopup(auth, provider)
-                .then((result) => {
+            signInWithEmailAndPassword(auth, emailInput, passwordInput)
+                .then((userCredential) => {
                     // เข้าสู่ระบบสำเร็จ (onAuthStateChanged จะทำงานต่อ)
-                }).catch((error) => {
+                })
+                .catch((error) => {
                     console.error("Login Error:", error);
-                    alert("เกิดข้อผิดพลาดในการล็อกอิน: " + error.message);
-                    loginBtn.innerHTML = 'ล็อกอินด้วย Google';
+                    let errorMessage = "เกิดข้อผิดพลาดในการล็อกอิน: ";
+                    if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+                         errorMessage += "อีเมลหรือรหัสผ่านไม่ถูกต้อง";
+                    } else {
+                         errorMessage += error.message;
+                    }
+                    alert(errorMessage);
+                    loginBtn.innerHTML = 'เข้าสู่ระบบ';
                     loginBtn.disabled = false;
                 });
         };
+
+        // ฟังก์ชันช่วยเหลือสำหรับแสดงข้อความกรณี Authorized Domain (ให้ข้อมูลกับผู้ใช้)
+        window.showGoogleLoginInfo = function() {
+            alert("⚠️ Google Sign-In ถูกระงับชั่วคราวเนื่องจากข้อจำกัดด้านความปลอดภัยของโดเมน\n\n(Error: auth/unauthorized-domain)\n\nกรุณาเข้าสู่ระบบด้วย อีเมล และ รหัสผ่าน แทนครับ\n\n[สำหรับผู้ดูแลระบบ: ต้องนำ URL ของหน้านี้ไปเพิ่มในเมนู Authorized domains ของ Firebase Authentication ก่อนจึงจะใช้ Google Sign-In ได้]");
+        }
 
         // --- NEW: ฟังก์ชันออกจากระบบ ---
         window.logoutUser = function() {
@@ -220,6 +243,32 @@
             margin-bottom: 2rem;
             font-size: 0.95rem;
         }
+        
+        /* สไตล์สำหรับ Form Login */
+        .login-form {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            text-align: left;
+        }
+        .login-form label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: -0.25rem;
+        }
+        .login-form input {
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+        .login-form input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37,99,235,0.15);
+        }
+        
         .btn-google {
             display: flex;
             align-items: center;
@@ -241,6 +290,22 @@
             background: #f8fafc;
             border-color: #94a3b8;
         }
+
+        .divider {
+            display: flex;
+            align-items: center;
+            text-align: center;
+            color: var(--text-muted);
+            margin: 1.5rem 0;
+            font-size: 0.85rem;
+        }
+        .divider::before, .divider::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .divider::before { margin-right: 0.5em; }
+        .divider::after { margin-left: 0.5em; }
 
         /* ================= App Layout (Desktop Focus) ================= */
         .app-layout { display: none; height: 100vh; width: 100vw; } /* ซ่อนไว้ก่อนจนกว่าจะล็อกอิน */
@@ -501,7 +566,21 @@
             <h1>FG Forecast System</h1>
             <p>ระบบจัดการแผนการผลิตและเบิกจ่ายสินค้า</p>
             
-            <button id="btn-login" class="btn-google" onclick="loginWithGoogle()">
+            <form class="login-form" onsubmit="loginWithEmail(event)">
+                <div class="form-group">
+                    <label for="login-email">อีเมลผู้ใช้งาน</label>
+                    <input type="email" id="login-email" placeholder="email@company.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="login-password">รหัสผ่าน</label>
+                    <input type="password" id="login-password" placeholder="••••••••" required>
+                </div>
+                <button type="submit" id="btn-login" class="btn btn-primary" style="margin-top: 0.5rem; padding: 0.85rem;">เข้าสู่ระบบ</button>
+            </form>
+            
+            <div class="divider">หรือ</div>
+            
+            <button class="btn-google" onclick="showGoogleLoginInfo()">
                 <svg viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg">
                     <g transform="matrix(1, 0, 0, 1, 27.009001, -39.238998)">
                         <path fill="#4285F4" d="M -3.264,51.509 C -3.264,50.719 -3.334,49.969 -3.454,49.239 L -14.754,49.239 L -14.754,53.749 L -8.284,53.749 C -8.574,55.229 -9.424,56.479 -10.684,57.329 L -10.684,60.329 L -6.824,60.329 C -4.564,58.239 -3.264,55.159 -3.264,51.509 Z"/>
